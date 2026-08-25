@@ -1,6 +1,7 @@
-from werewolf_arena.domain.engine import GameEngine
-from werewolf_arena.domain.enums import Visibility
+from werewolf_arena.domain.engine import GameEngine, replay
+from werewolf_arena.domain.enums import CommandKind, Phase, Visibility
 from werewolf_arena.domain.mode import standard_six_player_mode
+from werewolf_arena.domain.models import GameCommand
 from werewolf_arena.domain.projection import (
     ViewerContext,
     ViewerKind,
@@ -47,3 +48,28 @@ def test_dead_human_sees_only_public_events_until_finished() -> None:
     events = project_events(state.events, viewer, state)
 
     assert all(event["visibility"] == Visibility.PUBLIC.value for event in events)
+
+
+def test_replay_reproduces_a_deterministic_vote_resolution() -> None:
+    engine = GameEngine(standard_role_registry(), standard_six_player_mode(), seed=7)
+    initial = engine.create_game("human", requested_role_id="villager").model_copy(
+        update={"phase": Phase.DAY_VOTE}
+    )
+    target = next(player for player in initial.participants if player.participant_id != "human")
+    commands = tuple(
+        GameCommand(actor_id=player.participant_id, kind=CommandKind.VOTE, target_id=target.participant_id)
+        if player.participant_id != target.participant_id
+        else GameCommand(actor_id=player.participant_id, kind=CommandKind.VOTE, target_id="human")
+        for player in initial.participants
+    )
+
+    direct = initial
+    for command in commands:
+        direct = engine.submit(direct, command)
+    direct = engine.advance_automatic(direct)
+    replayed = replay(initial, commands, engine)
+
+    assert replayed.phase is direct.phase
+    assert replayed.status is direct.status
+    assert replayed.winner_faction is direct.winner_faction
+    assert [event.event_type for event in replayed.events] == [event.event_type for event in direct.events]

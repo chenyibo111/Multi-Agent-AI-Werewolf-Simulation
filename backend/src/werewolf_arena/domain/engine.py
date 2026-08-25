@@ -205,3 +205,13 @@ class GameEngine:
         return state.append_event(
             "command_rejected", {"actor_id": command.actor_id, "reason": reason}, Visibility.PUBLIC
         )
+
+
+def replay(initial_state: GameState, accepted_commands: tuple[GameCommand, ...], engine: GameEngine) -> GameState:
+    """从指定初始状态重放已接受命令，用于确定性恢复验证。"""
+
+    state = initial_state
+    for command in accepted_commands:
+        state = engine.submit(state, command)
+        state = engine.advance_automatic(state)
+    return state
