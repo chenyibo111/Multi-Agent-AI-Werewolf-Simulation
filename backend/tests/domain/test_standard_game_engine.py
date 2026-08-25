@@ -131,9 +131,14 @@ def test_executing_last_wolf_finishes_game_for_good_faction() -> None:
         }
     )
     for player in (player for player in state.participants if player.alive):
+        target_id = next(
+            candidate.participant_id
+            for candidate in state.participants
+            if candidate.alive and candidate.faction is Faction.GOOD
+        ) if player.participant_id == last_wolf.participant_id else last_wolf.participant_id
         state = engine.submit(
             state,
-            GameCommand(actor_id=player.participant_id, kind=CommandKind.VOTE, target_id=last_wolf.participant_id),
+            GameCommand(actor_id=player.participant_id, kind=CommandKind.VOTE, target_id=target_id),
         )
 
     state = engine.advance_automatic(state)
@@ -168,3 +173,71 @@ def test_witch_poison_consumes_the_single_use_resource() -> None:
 
     updated_witch = next(player for player in state.participants if player.participant_id == witch.participant_id)
     assert updated_witch.private_state["poison_available"] is False
+
+
+def test_executing_good_player_at_wolf_parity_finishes_game_for_wolves() -> None:
+    engine = standard_engine(seed=7)
+    state = engine.create_game("human", requested_role_id="villager")
+    wolves = [player for player in state.participants if player.role_id == "wolf"]
+    good = next(player for player in state.participants if player.role_id == "villager")
+    state = state.model_copy(
+        update={
+            "phase": Phase.DAY_VOTE,
+            "participants": tuple(
+                player
+                if player.participant_id in {wolves[0].participant_id, wolves[1].participant_id, good.participant_id}
+                else player.model_copy(update={"alive": False})
+                for player in state.participants
+            ),
+        }
+    )
+    for wolf in wolves:
+        state = engine.submit(
+            state, GameCommand(actor_id=wolf.participant_id, kind=CommandKind.VOTE, target_id=good.participant_id)
+        )
+    state = engine.submit(
+        state, GameCommand(actor_id=good.participant_id, kind=CommandKind.VOTE, target_id=wolves[0].participant_id)
+    )
+
+    state = engine.advance_automatic(state)
+
+    assert state.status is GameStatus.FINISHED
+    assert state.winner_faction is Faction.WOLF
+
+
+def test_self_targeted_wolf_attack_is_rejected() -> None:
+    engine = standard_engine(seed=7)
+    state = engine.create_game("human", requested_role_id="wolf")
+
+    result = engine.submit(
+        state, GameCommand(actor_id="human", kind=CommandKind.WOLF_KILL, target_id="human")
+    )
+
+    assert result.events[-1].payload["reason"] == "self_target_forbidden"
+    assert result.pending_commands == ()
+
+
+def test_exhausted_witch_poison_is_rejected() -> None:
+    engine = standard_engine(seed=7)
+    state = engine.create_game("human", requested_role_id="villager")
+    witch = next(player for player in state.participants if player.role_id == "witch")
+    target = next(player for player in state.participants if player.role_id == "wolf")
+    exhausted_witch = witch.model_copy(
+        update={"private_state": {**witch.private_state, "poison_available": False}}
+    )
+    state = state.model_copy(
+        update={
+            "phase": Phase.NIGHT_WITCH,
+            "participants": tuple(
+                exhausted_witch if player.participant_id == witch.participant_id else player
+                for player in state.participants
+            ),
+        }
+    )
+
+    result = engine.submit(
+        state, GameCommand(actor_id=witch.participant_id, kind=CommandKind.WITCH_POISON, target_id=target.participant_id)
+    )
+
+    assert result.events[-1].payload["reason"] == "ability_exhausted"
+    assert result.pending_commands == ()

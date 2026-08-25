@@ -74,6 +74,8 @@ class GameEngine:
             item.participant_id == command.target_id and item.alive for item in state.participants
         ):
             return self._reject(state, command, "invalid_target")
+        if command.target_id == command.actor_id:
+            return self._reject(state, command, "self_target_forbidden")
         if any(item.actor_id == command.actor_id for item in state.pending_commands):
             return self._reject(state, command, "duplicate_command")
         if command.kind is CommandKind.WITCH_SAVE:
