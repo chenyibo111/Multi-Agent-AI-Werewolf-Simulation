@@ -41,3 +41,48 @@ def test_dead_participant_command_is_rejected_without_state_change() -> None:
 
     assert result.events[-1].event_type == "command_rejected"
     assert result.pending_commands == state.pending_commands
+
+
+def test_matched_wolf_attack_can_be_saved_by_witch() -> None:
+    engine = standard_engine(seed=7)
+    state = engine.create_game("human", requested_role_id="wolf")
+    wolves = [player for player in state.participants if player.role_id == "wolf"]
+    victim = next(player for player in state.participants if player.role_id == "villager")
+    seer = next(player for player in state.participants if player.role_id == "seer")
+    witch = next(player for player in state.participants if player.role_id == "witch")
+
+    for wolf in wolves:
+        state = engine.submit(
+            state, GameCommand(actor_id=wolf.participant_id, kind=CommandKind.WOLF_KILL, target_id=victim.participant_id)
+        )
+    state = engine.advance_automatic(state)
+    state = engine.submit(
+        state, GameCommand(actor_id=seer.participant_id, kind=CommandKind.INSPECT, target_id=wolves[0].participant_id)
+    )
+    state = engine.advance_automatic(state)
+    state = engine.submit(
+        state, GameCommand(actor_id=witch.participant_id, kind=CommandKind.WITCH_SAVE, target_id=victim.participant_id)
+    )
+    state = engine.advance_automatic(state)
+
+    assert state.phase is Phase.DAY_DISCUSSION
+    assert next(player for player in state.participants if player.participant_id == victim.participant_id).alive
+    assert any(event.event_type == "inspection_result" for event in state.events)
+    assert any(event.event_type == "night_announcement" for event in state.events)
+
+
+def test_tied_day_votes_do_not_execute_any_player() -> None:
+    engine = standard_engine(seed=7)
+    state = engine.create_game("human", requested_role_id="villager").model_copy(update={"phase": Phase.DAY_VOTE})
+    target_left, target_right = "ai-1", "ai-2"
+    actors_for_left = [player.participant_id for player in state.participants if player.participant_id != target_left][:3]
+    actors_for_right = [player.participant_id for player in state.participants if player.participant_id not in actors_for_left and player.participant_id != target_right]
+
+    for actor_id in actors_for_left:
+        state = engine.submit(state, GameCommand(actor_id=actor_id, kind=CommandKind.VOTE, target_id=target_left))
+    for actor_id in actors_for_right:
+        state = engine.submit(state, GameCommand(actor_id=actor_id, kind=CommandKind.VOTE, target_id=target_right))
+    state = engine.advance_automatic(state)
+
+    assert all(player.alive for player in state.participants)
+    assert state.events[-1].event_type == "vote_tied"
