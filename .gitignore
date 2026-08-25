@@ -1,0 +1,15 @@
+.superpowers/
+
+# Local secrets and mutable runtime data
+.env
+.venv/
+__pycache__/
+*.py[cod]
+data/
+*.db
+*.sqlite3
+
+# JavaScript tooling
+node_modules/
+dist/
+coverage/
