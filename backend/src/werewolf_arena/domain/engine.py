@@ -6,7 +6,7 @@ import random
 
 from werewolf_arena.roles.registry import RoleRegistry
 
-from .enums import CommandKind, Phase, Visibility
+from .enums import CommandKind, Faction, GameStatus, Phase, Visibility
 from .mode import GameMode
 from .models import GameCommand, GameState, Participant
 
@@ -56,19 +56,34 @@ class GameEngine:
         if command.kind is CommandKind.VOTE and state.phase is not Phase.DAY_VOTE:
             return self._reject(state, command, "wrong_phase")
         allowed = {
-            Phase.NIGHT_WOLF: CommandKind.WOLF_KILL,
-            Phase.NIGHT_SEER: CommandKind.INSPECT,
-            Phase.NIGHT_WITCH: CommandKind.WITCH_SAVE,
-            Phase.DAY_VOTE: CommandKind.VOTE,
+            Phase.NIGHT_WOLF: {CommandKind.WOLF_KILL},
+            Phase.NIGHT_SEER: {CommandKind.INSPECT},
+            Phase.NIGHT_WITCH: {CommandKind.WITCH_SAVE, CommandKind.WITCH_POISON},
+            Phase.DAY_VOTE: {CommandKind.VOTE},
         }
-        if command.kind is not allowed.get(state.phase):
+        if command.kind not in allowed.get(state.phase, set()):
             return self._reject(state, command, "wrong_phase")
+        expected_role = {
+            Phase.NIGHT_WOLF: "wolf",
+            Phase.NIGHT_SEER: "seer",
+            Phase.NIGHT_WITCH: "witch",
+        }.get(state.phase)
+        if expected_role is not None and actor.role_id != expected_role:
+            return self._reject(state, command, "wrong_role")
         if command.target_id is None or not any(
             item.participant_id == command.target_id and item.alive for item in state.participants
         ):
             return self._reject(state, command, "invalid_target")
         if any(item.actor_id == command.actor_id for item in state.pending_commands):
             return self._reject(state, command, "duplicate_command")
+        if command.kind is CommandKind.WITCH_SAVE:
+            victim = self._night_victim(state)
+            if command.target_id != victim:
+                return self._reject(state, command, "invalid_save_target")
+            if not bool(actor.private_state.get("antidote_available")):
+                return self._reject(state, command, "ability_exhausted")
+        if command.kind is CommandKind.WITCH_POISON and not bool(actor.private_state.get("poison_available")):
+            return self._reject(state, command, "ability_exhausted")
         return state.model_copy(update={"pending_commands": (*state.pending_commands, command)})
 
     def advance_automatic(self, state: GameState) -> GameState:
@@ -105,12 +120,18 @@ class GameEngine:
             command = next((item for item in state.pending_commands if item.actor_id == witch.participant_id), None)
             if command is None:
                 return state
-            victim = next((event.payload.get("target_id") for event in state.events if event.event_type == "night_victim"), None)
+            victim = self._night_victim(state)
             saved = command.kind is CommandKind.WITCH_SAVE and command.target_id == victim
             poisoned = command.target_id if command.kind is CommandKind.WITCH_POISON else None
             dead_ids = {item for item in (victim, poisoned) if item is not None and item != command.target_id if not saved}
+            resource_key = "antidote_available" if command.kind is CommandKind.WITCH_SAVE else "poison_available"
+            updated_private_state = {**witch.private_state, resource_key: False}
             participants = tuple(
-                item.model_copy(update={"alive": False}) if item.participant_id in dead_ids else item
+                item.model_copy(update={"alive": False})
+                if item.participant_id in dead_ids
+                else item.model_copy(update={"private_state": updated_private_state})
+                if item.participant_id == witch.participant_id
+                else item
                 for item in state.participants
             )
             state = state.model_copy(update={"participants": participants, "pending_commands": ()})
@@ -136,8 +157,28 @@ class GameEngine:
             )
             state = state.model_copy(update={"participants": participants})
             state = state.append_event("execution", {"target_id": executed}, Visibility.PUBLIC)
-            return self._change_phase(state, Phase.NIGHT_WOLF)
+            return self._finish_if_winner(self._change_phase(state, Phase.NIGHT_WOLF))
         return state
+
+    @staticmethod
+    def _night_victim(state: GameState) -> str | None:
+        for event in reversed(state.events):
+            if event.event_type == "night_victim":
+                target_id = event.payload.get("target_id")
+                return target_id if isinstance(target_id, str) else None
+        return None
+
+    @staticmethod
+    def _finish_if_winner(state: GameState) -> GameState:
+        wolves = [item for item in state.participants if item.alive and item.faction is Faction.WOLF]
+        good = [item for item in state.participants if item.alive and item.faction is Faction.GOOD]
+        winner = Faction.GOOD if not wolves else Faction.WOLF if len(wolves) >= len(good) else None
+        if winner is None:
+            return state
+        state = state.model_copy(
+            update={"status": GameStatus.FINISHED, "phase": Phase.FINISHED, "winner_faction": winner}
+        )
+        return state.append_event("game_finished", {"winner_faction": winner.value}, Visibility.PUBLIC)
 
     @staticmethod
     def _change_phase(state: GameState, phase: Phase) -> GameState:
