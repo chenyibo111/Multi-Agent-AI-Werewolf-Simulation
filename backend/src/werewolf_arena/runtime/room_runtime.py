@@ -6,6 +6,7 @@ import asyncio
 from typing import Self
 from uuid import UUID
 
+from werewolf_arena.agents.orchestrator import GameOrchestrator, OrchestrationResult
 from werewolf_arena.domain.engine import GameEngine
 from werewolf_arena.domain.models import GameCommand, GameEvent, GameState
 from werewolf_arena.domain.projection import ViewerContext, project_events
@@ -22,10 +23,12 @@ class RoomRuntime:
         engine: GameEngine,
         repository: SQLiteRoomRepository,
         state: GameState,
+        orchestrator: GameOrchestrator | None = None,
     ) -> None:
         self._engine = engine
         self._repository = repository
         self._state = state
+        self._orchestrator = orchestrator
         self._lock = asyncio.Lock()
         self._subscribers: dict[asyncio.Queue[RuntimeEnvelope], ViewerContext] = {}
 
@@ -35,9 +38,10 @@ class RoomRuntime:
         engine: GameEngine,
         repository: SQLiteRoomRepository,
         room_id: UUID,
+        orchestrator: GameOrchestrator | None = None,
     ) -> Self:
         """Reconstruct a room runtime from its latest authoritative snapshot."""
-        return cls(engine, repository, await repository.load_state(room_id))
+        return cls(engine, repository, await repository.load_state(room_id), orchestrator=orchestrator)
 
     async def get_state(self) -> GameState:
         """Return the current authority state for an already-authorized server caller."""
@@ -58,6 +62,33 @@ class RoomRuntime:
             new_events = next_state.events[len(before.events) :]
             self._publish(new_events, next_state)
             return next_state
+
+    async def advance_until_waiting(self) -> OrchestrationResult:
+        """Persist all automatic AI work, then return the next human wait boundary."""
+        if self._orchestrator is None:
+            raise RuntimeError("Room runtime has no agent orchestrator")
+        async with self._lock:
+            before = self._state
+            result = await self._orchestrator.advance(before)
+            if result.state != before:
+                self._state = result.state
+                await self._repository.save_state(result.state)
+                if result.agent_runs:
+                    previous_runs = await self._repository.agent_runs_for(result.state.game_id)
+                    for index, record in enumerate(result.agent_runs, start=len(previous_runs)):
+                        await self._repository.record_agent_run(
+                            result.state.game_id,
+                            record.model_copy(update={"attempt_index": index}),
+                        )
+                self._publish(result.state.events[len(before.events) :], result.state)
+            return result
+
+    async def current_wait_status(self) -> OrchestrationResult:
+        """Describe the current human wait boundary without invoking any model."""
+        if self._orchestrator is None:
+            return OrchestrationResult(self._state, False)
+        async with self._lock:
+            return self._orchestrator.wait_status(self._state)
 
     def subscribe(self, viewer: ViewerContext) -> asyncio.Queue[RuntimeEnvelope]:
         """Register a queue that receives only events projected for one viewer."""

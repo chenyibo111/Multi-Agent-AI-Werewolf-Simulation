@@ -45,6 +45,7 @@ class CommandKind(str, Enum):
     WITCH_SAVE = "witch_save"
     WITCH_POISON = "witch_poison"
     SPEAK = "speak"
+    END_DISCUSSION = "end_discussion"
     VOTE = "vote"
     ABSTAIN = "abstain"
     NOOP = "noop"

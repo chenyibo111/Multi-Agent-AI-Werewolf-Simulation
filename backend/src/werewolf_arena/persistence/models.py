@@ -34,3 +34,14 @@ class PlayerSessionRow(Base):
     token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
     room_id: Mapped[str] = mapped_column(String, index=True)
     participant_id: Mapped[str] = mapped_column(String)
+
+
+class AgentRunRow(Base):
+    """Redacted per-attempt metadata for model operational accounting."""
+
+    __tablename__ = "agent_runs"
+
+    run_id: Mapped[str] = mapped_column(String, primary_key=True)
+    room_id: Mapped[str] = mapped_column(String, index=True)
+    attempt_index: Mapped[int] = mapped_column(Integer)
+    record_json: Mapped[str] = mapped_column(Text)

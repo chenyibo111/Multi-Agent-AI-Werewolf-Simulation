@@ -61,6 +61,15 @@ class GameEvent(DomainModel):
     recipient_ids: frozenset[str] = Field(default_factory=frozenset)
 
 
+class AgentUsage(DomainModel):
+    """Durable room-level accounting used to stop model spending safely."""
+
+    model_calls: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float = 0.0
+
+
 class GameState(DomainModel):
     """一局游戏的完整服务端状态。"""
 
@@ -74,6 +83,7 @@ class GameState(DomainModel):
     events: tuple[GameEvent, ...] = ()
     pending_commands: tuple[GameCommand, ...] = ()
     winner_faction: Faction | None = None
+    agent_usage: AgentUsage = Field(default_factory=AgentUsage)
 
     @classmethod
     def empty(cls, game_id: UUID | None = None) -> Self:

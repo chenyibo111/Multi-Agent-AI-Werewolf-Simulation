@@ -8,9 +8,10 @@ from uuid import UUID
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from werewolf_arena.agents.budget import AgentRunRecord
 from werewolf_arena.domain.models import GameEvent, GameState
 
-from .models import Base, EventRow, PlayerSessionRow, RoomRow, SnapshotRow
+from .models import AgentRunRow, Base, EventRow, PlayerSessionRow, RoomRow, SnapshotRow
 
 
 class SQLiteRoomRepository:
@@ -53,6 +54,30 @@ class SQLiteRoomRepository:
             rows = (await session.execute(statement)).scalars().all()
         return tuple(GameEvent.model_validate_json(row.event_json) for row in rows)
 
+    async def record_agent_run(self, room_id: UUID, record: AgentRunRecord) -> None:
+        """Persist redacted metrics for one model-call attempt."""
+        async with self._sessions() as session:
+            session.add(
+                AgentRunRow(
+                    run_id=str(record.run_id),
+                    room_id=str(room_id),
+                    attempt_index=record.attempt_index,
+                    record_json=record.model_dump_json(),
+                )
+            )
+            await session.commit()
+
+    async def agent_runs_for(self, room_id: UUID) -> tuple[AgentRunRecord, ...]:
+        """Load ordered, redacted model-run metrics for a room's internal accounting."""
+        statement = (
+            select(AgentRunRow)
+            .where(AgentRunRow.room_id == str(room_id))
+            .order_by(AgentRunRow.attempt_index)
+        )
+        async with self._sessions() as session:
+            rows = (await session.execute(statement)).scalars().all()
+        return tuple(AgentRunRecord.model_validate_json(row.record_json) for row in rows)
+
     async def issue_session(self, room_id: UUID, participant_id: str) -> str:
         """Return a new browser credential while persisting only its hash."""
         raw_token = token_urlsafe(32)
@@ -91,6 +116,7 @@ class SQLiteRoomRepository:
         room_key = str(room_id)
         async with self._sessions() as session:
             await session.execute(delete(PlayerSessionRow).where(PlayerSessionRow.room_id == room_key))
+            await session.execute(delete(AgentRunRow).where(AgentRunRow.room_id == room_key))
             await session.execute(delete(EventRow).where(EventRow.room_id == room_key))
             await session.execute(delete(SnapshotRow).where(SnapshotRow.room_id == room_key))
             await session.execute(delete(RoomRow).where(RoomRow.room_id == room_key))

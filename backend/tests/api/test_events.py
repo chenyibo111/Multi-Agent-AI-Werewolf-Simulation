@@ -13,7 +13,7 @@ def test_websocket_replays_visible_events_and_streams_new_ones(tmp_path) -> None
     """Reconnects resume at a sequence while authority-only events stay hidden."""
     app = create_app(database_path=tmp_path / "werewolf.db")
     with TestClient(app) as client:
-        created = client.post("/api/rooms", json={"requested_role_id": "villager"}).json()
+        created = client.post("/api/rooms", json={"requested_role_id": "wolf"}).json()
         room_id = created["room_id"]
         headers = {"Authorization": f"Bearer {created['session_token']}"}
 
@@ -26,7 +26,7 @@ def test_websocket_replays_visible_events_and_streams_new_ones(tmp_path) -> None
             response = client.post(
                 f"/api/rooms/{room_id}/commands",
                 headers=headers,
-                json={"kind": "wolf_kill", "target_id": "ai-1"},
+                json={"kind": "wolf_kill", "target_id": "human"},
             )
             assert response.status_code == 422
             streamed = socket.receive_json()
@@ -34,7 +34,7 @@ def test_websocket_replays_visible_events_and_streams_new_ones(tmp_path) -> None
                 {
                     "sequence": 3,
                     "event_type": "command_rejected",
-                    "payload": {"actor_id": "human", "reason": "wrong_role"},
+                    "payload": {"actor_id": "human", "reason": "self_target_forbidden"},
                     "visibility": "public",
                 }
             ]
@@ -59,3 +59,16 @@ def test_websocket_rejects_foreign_room_token(tmp_path) -> None:
             pass
 
     assert error.value.code == 1008
+
+
+def test_websocket_accepts_the_room_scoped_browser_cookie(tmp_path) -> None:
+    """The session cookie issued at room creation also authenticates browser WebSockets."""
+    app = create_app(database_path=tmp_path / "werewolf.db")
+    with TestClient(app) as client:
+        created = client.post("/api/rooms", json={"requested_role_id": "wolf"}).json()
+
+        with client.websocket_connect(f"/api/rooms/{created['room_id']}/events?after_sequence=0") as socket:
+            catch_up = socket.receive_json()
+
+    assert catch_up["type"] == "events"
+    assert [event["event_type"] for event in catch_up["events"]] == ["phase_changed"]
