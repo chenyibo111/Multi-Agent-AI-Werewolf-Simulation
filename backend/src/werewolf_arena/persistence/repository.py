@@ -75,6 +75,16 @@ class SQLiteRoomRepository:
             await session.execute(delete(PlayerSessionRow).where(PlayerSessionRow.room_id == str(room_id)))
             await session.commit()
 
+    async def delete_room(self, room_id: UUID) -> None:
+        """Delete all authority records and local credentials for one room."""
+        room_key = str(room_id)
+        async with self._sessions() as session:
+            await session.execute(delete(PlayerSessionRow).where(PlayerSessionRow.room_id == room_key))
+            await session.execute(delete(EventRow).where(EventRow.room_id == room_key))
+            await session.execute(delete(SnapshotRow).where(SnapshotRow.room_id == room_key))
+            await session.execute(delete(RoomRow).where(RoomRow.room_id == room_key))
+            await session.commit()
+
     async def _save(self, session: AsyncSession, room_id: str, state: GameState) -> None:
         await session.merge(SnapshotRow(room_id=room_id, state_json=state.model_dump_json()))
         await session.execute(delete(EventRow).where(EventRow.room_id == room_id))
