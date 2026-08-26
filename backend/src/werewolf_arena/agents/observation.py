@@ -13,6 +13,19 @@ def build_observation(state: GameState, participant_id: str) -> AgentObservation
     participant = _participant(state, participant_id)
     memory_data = participant.private_state.get("agent_memory", {})
     memory = AgentMemory.model_validate(memory_data) if isinstance(memory_data, dict) else AgentMemory()
+    private_facts: dict[str, object] = {
+        "role_id": participant.role_id,
+        "faction": participant.faction.value,
+        "resources": {
+            key: value for key, value in participant.private_state.items() if key != "agent_memory"
+        },
+    }
+    if participant.role_id == "wolf":
+        private_facts["wolf_teammates"] = [
+            item.participant_id
+            for item in state.participants
+            if item.alive and item.role_id == "wolf" and item.participant_id != participant_id
+        ]
     return AgentObservation(
         participant_id=participant_id,
         phase=state.phase,
@@ -22,17 +35,15 @@ def build_observation(state: GameState, participant_id: str) -> AgentObservation
             for event in state.events
             if event.visibility is Visibility.PRIVATE and participant_id in event.recipient_ids
         ),
-        private_facts={
-            "role_id": participant.role_id,
-            "faction": participant.faction.value,
-            "resources": {
-                key: value
-                for key, value in participant.private_state.items()
-                if key != "agent_memory"
-            },
-        },
+        private_facts=private_facts,
         legal_kinds=_legal_kinds(state.phase, participant),
-        legal_target_ids=tuple(item.participant_id for item in state.participants if item.alive and item.participant_id != participant_id),
+        legal_target_ids=tuple(
+            item.participant_id
+            for item in state.participants
+            if item.alive
+            and item.participant_id != participant_id
+            and not (state.phase is Phase.NIGHT_WOLF and participant.role_id == "wolf" and item.role_id == "wolf")
+        ),
         memory=memory,
     )
 

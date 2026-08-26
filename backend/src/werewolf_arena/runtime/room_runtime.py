@@ -73,6 +73,13 @@ class RoomRuntime:
             if result.state != before:
                 self._state = result.state
                 await self._repository.save_state(result.state)
+                if result.agent_runs:
+                    previous_runs = await self._repository.agent_runs_for(result.state.game_id)
+                    for index, record in enumerate(result.agent_runs, start=len(previous_runs)):
+                        await self._repository.record_agent_run(
+                            result.state.game_id,
+                            record.model_copy(update={"attempt_index": index}),
+                        )
                 self._publish(result.state.events[len(before.events) :], result.state)
             return result
 

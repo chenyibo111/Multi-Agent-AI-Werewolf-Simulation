@@ -44,3 +44,15 @@ def test_policy_rejects_model_actor_override_and_returns_safe_noop() -> None:
         assert decision.failure_kind == "invalid_model_output"
 
     asyncio.run(scenario())
+
+
+def test_wolf_observation_contains_only_its_team_and_never_allows_team_kills() -> None:
+    """Wolf coordination is private, while the server excludes wolf teammates from kill candidates."""
+    engine = GameEngine(standard_role_registry(), standard_six_player_mode(), seed=7)
+    state = engine.create_game("human", requested_role_id="villager")
+    wolves = [participant for participant in state.participants if participant.role_id == "wolf"]
+
+    observation = build_observation(state, wolves[0].participant_id)
+
+    assert observation.private_facts["wolf_teammates"] == [wolves[1].participant_id]
+    assert wolves[1].participant_id not in observation.legal_target_ids

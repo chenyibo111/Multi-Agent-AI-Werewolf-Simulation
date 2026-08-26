@@ -93,6 +93,10 @@ class GameEngine:
             return self._reject(state, command, "invalid_target")
         if needs_target and command.target_id == command.actor_id:
             return self._reject(state, command, "self_target_forbidden")
+        if command.kind is CommandKind.WOLF_KILL:
+            target = next(item for item in state.participants if item.participant_id == command.target_id)
+            if target.role_id == "wolf":
+                return self._reject(state, command, "wolf_teammate_forbidden")
         if any(item.actor_id == command.actor_id for item in state.pending_commands):
             return self._reject(state, command, "duplicate_command")
         if command.kind is CommandKind.WITCH_SAVE:

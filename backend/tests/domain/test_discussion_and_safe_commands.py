@@ -58,3 +58,18 @@ def test_noop_completes_a_night_ability_turn_without_a_target() -> None:
 
     assert state.phase is Phase.NIGHT_WITCH
     assert state.pending_commands == ()
+
+
+def test_wolves_cannot_submit_a_kill_against_their_teammate() -> None:
+    """The authority engine enforces the same team-safety rule exposed to wolf policies."""
+    engine = _engine()
+    state = engine.create_game("human", requested_role_id="villager")
+    wolves = [participant for participant in state.participants if participant.role_id == "wolf"]
+
+    state = engine.submit(
+        state,
+        GameCommand(actor_id=wolves[0].participant_id, kind=CommandKind.WOLF_KILL, target_id=wolves[1].participant_id),
+    )
+
+    assert state.events[-1].event_type == "command_rejected"
+    assert state.events[-1].payload["reason"] == "wolf_teammate_forbidden"
