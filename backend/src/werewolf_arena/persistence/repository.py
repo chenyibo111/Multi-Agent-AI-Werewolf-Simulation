@@ -5,7 +5,7 @@ from pathlib import Path
 from secrets import token_urlsafe
 from uuid import UUID
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from werewolf_arena.domain.models import GameEvent, GameState
@@ -98,10 +98,13 @@ class SQLiteRoomRepository:
 
     async def _save(self, session: AsyncSession, room_id: str, state: GameState) -> None:
         await session.merge(SnapshotRow(room_id=room_id, state_json=state.model_dump_json()))
-        await session.execute(delete(EventRow).where(EventRow.room_id == room_id))
+        last_sequence = await session.scalar(
+            select(func.max(EventRow.sequence)).where(EventRow.room_id == room_id)
+        )
         session.add_all(
             EventRow(room_id=room_id, sequence=event.sequence, event_json=event.model_dump_json())
             for event in state.events
+            if event.sequence > (last_sequence or 0)
         )
 
     @staticmethod

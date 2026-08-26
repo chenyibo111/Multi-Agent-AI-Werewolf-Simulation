@@ -1,4 +1,5 @@
 import asyncio
+import sqlite3
 
 from werewolf_arena.domain.engine import GameEngine
 from werewolf_arena.domain.enums import Visibility
@@ -23,5 +24,37 @@ def test_sqlite_repository_round_trips_state_and_events(tmp_path) -> None:
         assert loaded.mode_version == state.mode_version
         assert [event.sequence for event in loaded.events] == [event.sequence for event in state.events]
         assert loaded.participants == state.participants
+
+    asyncio.run(scenario())
+
+
+def test_sqlite_repository_appends_new_events_without_deleting_existing_audit_rows(tmp_path) -> None:
+    """Saving a newer snapshot extends the event audit trail instead of rebuilding it."""
+
+    async def scenario() -> None:
+        engine = GameEngine(standard_role_registry(), standard_six_player_mode(), seed=7)
+        first_state = engine.create_game("human", requested_role_id="villager")
+        database_path = tmp_path / "werewolf.db"
+        repository = SQLiteRoomRepository(database_path)
+        await repository.initialize()
+        await repository.create_room(first_state)
+        await repository.save_state(first_state)
+
+        connection = sqlite3.connect(database_path)
+        try:
+            connection.execute(
+                "CREATE TRIGGER reject_event_deletion BEFORE DELETE ON game_events "
+                "BEGIN SELECT RAISE(FAIL, 'event audit rows must be append-only'); END;"
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        second_state = first_state.append_event("audit_marker", {}, Visibility.SERVER)
+        await repository.save_state(second_state)
+        events = await repository.events_after(second_state.game_id, after_sequence=0)
+
+        assert [event.sequence for event in events] == [1, 2, 3]
+        assert events[-1].event_type == "audit_marker"
 
     asyncio.run(scenario())
