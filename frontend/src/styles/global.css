@@ -1,0 +1,13 @@
+:root {
+  color: #f0efff;
+  background: #10152c;
+  font-family: Inter, "Microsoft YaHei", system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body { margin: 0; min-width: 320px; min-height: 100vh; }
+
+button, input, select, textarea { font: inherit; }
+
+.app-shell { display: grid; min-height: 100vh; place-items: center; }
