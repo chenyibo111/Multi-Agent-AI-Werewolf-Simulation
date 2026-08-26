@@ -20,6 +20,9 @@ def test_room_rest_lifecycle_requires_its_own_bearer_token(tmp_path) -> None:
         assert state["participants"]["human"]["role_id"] == "wolf"
         assert "role_id" not in state["participants"]["ai-1"]
 
+        assert client.get(f"/api/rooms/{room_id}").status_code == 200
+
+        client.cookies.clear()
         assert client.get(f"/api/rooms/{room_id}").status_code == 401
 
         second = client.post("/api/rooms", json={"requested_role_id": "villager"})
@@ -50,18 +53,18 @@ def test_rejected_command_returns_safe_validation_response(tmp_path) -> None:
     """A domain rejection becomes a 422 response without leaking authority fields."""
     app = create_app(database_path=tmp_path / "werewolf.db")
     with TestClient(app) as client:
-        created = client.post("/api/rooms", json={"requested_role_id": "villager"}).json()
+        created = client.post("/api/rooms", json={"requested_role_id": "wolf"}).json()
         headers = {"Authorization": f"Bearer {created['session_token']}"}
 
         response = client.post(
             f"/api/rooms/{created['room_id']}/commands",
             headers=headers,
-            json={"kind": "wolf_kill", "target_id": "ai-1"},
+            json={"kind": "wolf_kill", "target_id": "human"},
         )
 
     assert response.status_code == 422
     payload = response.json()
-    assert payload["detail"] == "wrong_role"
+    assert payload["detail"] == "self_target_forbidden"
 
 
 def test_room_resumes_after_application_restart(tmp_path) -> None:

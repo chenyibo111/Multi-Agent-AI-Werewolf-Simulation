@@ -76,6 +76,13 @@ class RoomRuntime:
                 self._publish(result.state.events[len(before.events) :], result.state)
             return result
 
+    async def current_wait_status(self) -> OrchestrationResult:
+        """Describe the current human wait boundary without invoking any model."""
+        if self._orchestrator is None:
+            return OrchestrationResult(self._state, False)
+        async with self._lock:
+            return self._orchestrator.wait_status(self._state)
+
     def subscribe(self, viewer: ViewerContext) -> asyncio.Queue[RuntimeEnvelope]:
         """Register a queue that receives only events projected for one viewer."""
         queue: asyncio.Queue[RuntimeEnvelope] = asyncio.Queue()

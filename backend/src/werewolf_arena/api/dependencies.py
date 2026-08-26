@@ -32,12 +32,17 @@ async def require_room_session(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)] = None,
 ) -> AuthorizedRoom:
     """Authenticate a bearer credential before exposing a room or accepting intent."""
-    if credentials is None or credentials.scheme.lower() != "bearer":
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing bearer session token")
+    raw_token = (
+        credentials.credentials
+        if credentials is not None and credentials.scheme.lower() == "bearer"
+        else request.cookies.get("werewolf_room_session")
+    )
+    if raw_token is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing room session token")
 
     repository = request.app.state.repository
     try:
-        participant_id = await repository.authorize_session(room_id, credentials.credentials)
+        participant_id = await repository.authorize_session(room_id, raw_token)
     except PermissionError as error:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Invalid room session") from error
 

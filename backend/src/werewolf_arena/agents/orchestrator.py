@@ -60,6 +60,20 @@ class GameOrchestrator:
             state = advanced
         return OrchestrationResult(state, False)
 
+    def wait_status(self, state: GameState) -> OrchestrationResult:
+        """Report whether the persisted state is already waiting for the human."""
+        if state.phase is Phase.FINISHED:
+            return OrchestrationResult(state, False)
+        actors = self._actors_for_phase(state)
+        human = next((item for item in actors if item.is_human), None)
+        if human is not None:
+            return OrchestrationResult(state, True, self._human_actions(state, human))
+        if state.phase is Phase.DAY_DISCUSSION:
+            human = self._human(state)
+            if human.alive and self._all_ai_players_spoke(state):
+                return OrchestrationResult(state, True, self._human_actions(state, human))
+        return OrchestrationResult(state, False)
+
     async def _run_wolf_team(self, state: GameState, actors: tuple[Participant, ...]) -> GameState:
         if not actors:
             return state
@@ -82,11 +96,7 @@ class GameOrchestrator:
         return state
 
     async def _run_discussion(self, state: GameState) -> tuple[GameState, bool]:
-        spoken_ids = {
-            event.payload.get("actor_id")
-            for event in state.events
-            if event.event_type == "public_speech" and isinstance(event.payload.get("actor_id"), str)
-        }
+        spoken_ids = self._spoken_ids(state)
         ai_players = tuple(item for item in state.participants if item.alive and not item.is_human)
         for actor in ai_players:
             if actor.participant_id in spoken_ids:
@@ -99,6 +109,23 @@ class GameOrchestrator:
             )
         human = self._human(state)
         return state, human.alive
+
+    @staticmethod
+    def _spoken_ids(state: GameState) -> set[str]:
+        spoken_ids: set[str] = set()
+        for event in state.events:
+            actor_id = event.payload.get("actor_id")
+            if event.event_type == "public_speech" and isinstance(actor_id, str):
+                spoken_ids.add(actor_id)
+        return spoken_ids
+
+    def _all_ai_players_spoke(self, state: GameState) -> bool:
+        spoken_ids = self._spoken_ids(state)
+        return all(
+            participant.participant_id in spoken_ids
+            for participant in state.participants
+            if participant.alive and not participant.is_human
+        )
 
     async def _decision(self, state: GameState, actor: Participant) -> tuple[AgentDecision, GameState]:
         policy = self._policies.get(actor.participant_id)

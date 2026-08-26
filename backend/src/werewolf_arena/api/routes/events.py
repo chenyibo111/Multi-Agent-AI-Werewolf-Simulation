@@ -52,11 +52,10 @@ async def room_events(websocket: WebSocket, room_id: UUID, after_sequence: int =
 
 
 def _bearer_token(websocket: WebSocket) -> str | None:
-    """Parse a standard Authorization header without accepting alternate transports."""
+    """Prefer a bearer header, then use the room-scoped browser session cookie."""
     authorization = websocket.headers.get("authorization")
-    if authorization is None:
-        return None
-    scheme, separator, token = authorization.partition(" ")
-    if separator == "" or scheme.lower() != "bearer" or not token:
-        return None
-    return token
+    if authorization is not None:
+        scheme, separator, token = authorization.partition(" ")
+        if separator != "" and scheme.lower() == "bearer" and token:
+            return token
+    return websocket.cookies.get("werewolf_room_session")
