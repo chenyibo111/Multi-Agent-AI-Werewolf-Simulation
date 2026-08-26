@@ -26,6 +26,34 @@ uv run uvicorn werewolf_arena.api.app:create_app --factory --reload
 
 默认监听 `http://127.0.0.1:8000`。SQLite 文件默认为当前 `backend/` 目录中的 `werewolf_arena.db`；也可通过环境变量 `WEREWOLF_ARENA_DATABASE_PATH` 指定。
 
+## 启动浏览器界面
+
+开发时请打开两个终端：
+
+```powershell
+# 终端一
+cd backend
+uv run uvicorn werewolf_arena.api.app:create_app --factory --reload
+
+# 终端二
+cd frontend
+npm install
+npm run dev
+```
+
+打开 Vite 输出的本地地址（默认 `http://127.0.0.1:5173`）。前端会通过开发代理连接 API，房间 HttpOnly Cookie 会自动随请求和 WebSocket 发送，无需复制令牌。
+
+若要用 FastAPI 单独托管构建后的页面：
+
+```powershell
+cd frontend
+npm run build
+cd ../backend
+uv run uvicorn werewolf_arena.api.app:create_app --factory
+```
+
+此时访问 `http://127.0.0.1:8000`。需要另行托管 API 时，在 `frontend/.env` 设置 `VITE_API_BASE_URL`；本地代理模式保持为空。
+
 若要启用 AI 对局，在 `backend/.env` 中配置：
 
 ```dotenv

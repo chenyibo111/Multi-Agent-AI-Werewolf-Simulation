@@ -9,3 +9,5 @@
 Phase 3 已提供真实模型适配、严格 AI 观察隔离、自动推进、预算与调用审计，以及浏览器可用的房间 Cookie。React 月夜秘仪界面、对局历史/复盘和部署能力仍是后续阶段工作。
 
 后端运行与验证说明见 [backend/README.md](backend/README.md)。
+
+浏览器界面位于 [frontend](frontend)。开发请先启动后端，再在该目录执行 `npm install` 和 `npm run dev`；完整说明见 [后端启动文档](backend/README.md#启动浏览器界面)。
