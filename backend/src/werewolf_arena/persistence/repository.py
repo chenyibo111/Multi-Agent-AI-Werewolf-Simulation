@@ -43,6 +43,12 @@ class SQLiteRoomRepository:
                 raise KeyError(f"room snapshot not found: {room_id}")
             return GameState.model_validate_json(snapshot.state_json)
 
+    async def room_exists(self, room_id: UUID) -> bool:
+        """Return whether the room authority record still exists."""
+        statement = select(RoomRow.room_id).where(RoomRow.room_id == str(room_id))
+        async with self._sessions() as session:
+            return (await session.execute(statement)).scalar_one_or_none() is not None
+
     async def events_after(self, room_id: UUID, after_sequence: int) -> tuple[GameEvent, ...]:
         """Load authoritative events newer than a browser's acknowledged sequence."""
         statement = (

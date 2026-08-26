@@ -1,4 +1,4 @@
-import type { CreatedRoom, HumanCommand, RoomPayload } from "./types";
+import type { CreatedRoom, HumanCommand, RoomPayload, RoomReport } from "./types";
 
 type CreateRoomResponse = RoomPayload & { room_id: string; session_token?: string };
 
@@ -42,16 +42,35 @@ export class ApiClient {
     });
   }
 
+  getReport(roomId: string): Promise<RoomReport> {
+    return this.request<RoomReport>(`/api/rooms/${encodeURIComponent(roomId)}/report`);
+  }
+
+  async deleteRoom(roomId: string): Promise<void> {
+    await this.requestEmpty(`/api/rooms/${encodeURIComponent(roomId)}`, { method: "DELETE" });
+  }
+
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
-    const response = await fetch(`${this.baseUrl}${path}`, {
-      ...init,
-      credentials: "include",
-      headers: { "Content-Type": "application/json", ...init.headers },
-    });
+    const response = await this.send(path, init);
     if (!response.ok) {
       throw new ApiRequestError(await errorMessage(response));
     }
     return (await response.json()) as T;
+  }
+
+  private async requestEmpty(path: string, init: RequestInit = {}): Promise<void> {
+    const response = await this.send(path, init);
+    if (!response.ok) {
+      throw new ApiRequestError(await errorMessage(response));
+    }
+  }
+
+  private send(path: string, init: RequestInit): Promise<Response> {
+    return fetch(`${this.baseUrl}${path}`, {
+      ...init,
+      credentials: "include",
+      headers: { "Content-Type": "application/json", ...init.headers },
+    });
   }
 }
 

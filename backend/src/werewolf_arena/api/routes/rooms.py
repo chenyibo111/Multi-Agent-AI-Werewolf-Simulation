@@ -15,6 +15,7 @@ from werewolf_arena.domain.projection import (
     ViewerContext,
     ViewerKind,
     project_events,
+    project_finished_report,
     project_state,
 )
 
@@ -67,6 +68,17 @@ async def get_room(
         "state": _state_view(state, authorized.viewer, current.waiting_for_human, current.human_actions),
         "events": project_events(state.events, authorized.viewer, state),
     }
+
+
+@router.get("/{room_id}/report")
+async def get_finished_report(
+    authorized: Annotated[AuthorizedRoom, Depends(require_room_session)],
+) -> dict[str, object]:
+    """Return a safe complete replay only after the room has reached a result."""
+    state = await authorized.runtime.get_state()
+    if state.status.value != "finished":
+        raise HTTPException(status.HTTP_409_CONFLICT, "Room is still in progress")
+    return project_finished_report(state)
 
 
 @router.post("/{room_id}/commands")
@@ -129,8 +141,16 @@ def _state_view(
     human_actions: tuple[CommandKind, ...],
 ) -> dict[str, object]:
     view = project_state(state, viewer)
-    view["waiting_for_human"] = waiting_for_human
-    view["human_actions"] = [getattr(action, "value", str(action)) for action in human_actions]
+    is_active = viewer.kind is ViewerKind.ALIVE_HUMAN and state.status.value != "finished"
+    view["view_mode"] = (
+        "finished"
+        if state.status.value == "finished"
+        else "spectating"
+        if viewer.kind is ViewerKind.DEAD_SPECTATOR
+        else "active"
+    )
+    view["waiting_for_human"] = waiting_for_human if is_active else False
+    view["human_actions"] = [getattr(action, "value", str(action)) for action in human_actions] if is_active else []
     target_actions = {
         CommandKind.WOLF_KILL,
         CommandKind.INSPECT,
@@ -138,10 +158,12 @@ def _state_view(
         CommandKind.WITCH_POISON,
         CommandKind.VOTE,
     }
-    observation = build_observation(state, viewer.participant_id)
-    view["legal_target_ids"] = list(observation.legal_target_ids) if any(
-        action in target_actions for action in human_actions
-    ) else []
+    observation = build_observation(state, viewer.participant_id) if is_active else None
+    view["legal_target_ids"] = (
+        list(observation.legal_target_ids)
+        if observation is not None and any(action in target_actions for action in human_actions)
+        else []
+    )
     view["phase_text"] = {
         "night_wolf": "狼人行动",
         "night_seer": "预言家查验",

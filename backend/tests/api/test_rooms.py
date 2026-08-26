@@ -5,6 +5,12 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from werewolf_arena.api.app import create_app
+from werewolf_arena.api.routes.rooms import _state_view
+from werewolf_arena.domain.engine import GameEngine
+from werewolf_arena.domain.enums import CommandKind
+from werewolf_arena.domain.mode import standard_six_player_mode
+from werewolf_arena.domain.projection import ViewerContext, ViewerKind
+from werewolf_arena.roles.standard import standard_role_registry
 
 
 def test_room_rest_lifecycle_requires_its_own_bearer_token(tmp_path) -> None:
@@ -65,6 +71,45 @@ def test_rejected_command_returns_safe_validation_response(tmp_path) -> None:
     assert response.status_code == 422
     payload = response.json()
     assert payload["detail"] == "self_target_forbidden"
+
+
+def test_running_room_rejects_finished_report_request(tmp_path) -> None:
+    """The report route cannot turn an in-progress room into an identity leak."""
+    app = create_app(database_path=tmp_path / "werewolf.db")
+    with TestClient(app) as client:
+        created = client.post("/api/rooms", json={"requested_role_id": "villager"}).json()
+        response = client.get(f"/api/rooms/{created['room_id']}/report")
+
+    assert response.status_code == 409
+
+
+def test_dead_human_room_view_is_public_spectating_without_actions() -> None:
+    """Death revokes private room controls even if the runtime still has a wait status."""
+    engine = GameEngine(standard_role_registry(), standard_six_player_mode(), seed=7)
+    state = engine.create_game("human", requested_role_id="seer")
+    dead_state = state.model_copy(
+        update={
+            "participants": tuple(
+                participant.model_copy(update={"alive": False})
+                if participant.participant_id == "human"
+                else participant
+                for participant in state.participants
+            )
+        }
+    )
+
+    view = _state_view(
+        dead_state,
+        ViewerContext("human", ViewerKind.DEAD_SPECTATOR),
+        waiting_for_human=True,
+        human_actions=(CommandKind.INSPECT,),
+    )
+
+    assert view["view_mode"] == "spectating"
+    assert view["waiting_for_human"] is False
+    assert view["human_actions"] == []
+    assert view["legal_target_ids"] == []
+    assert "private_state" not in view["participants"]["human"]
 
 
 def test_room_resumes_after_application_restart(tmp_path) -> None:

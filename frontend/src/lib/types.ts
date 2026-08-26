@@ -33,6 +33,7 @@ export type RoomSnapshot = {
   human_actions: HumanAction[];
   legal_target_ids: string[];
   phase_text: string;
+  view_mode: "active" | "spectating" | "finished";
 };
 
 export type RoomEvent = {
@@ -44,6 +45,12 @@ export type RoomEvent = {
 
 export type RoomPayload = {
   state: RoomSnapshot;
+  events: RoomEvent[];
+};
+
+export type RoomReport = {
+  winner_faction: string | null;
+  participants: Record<string, ProjectedParticipant>;
   events: RoomEvent[];
 };
 
