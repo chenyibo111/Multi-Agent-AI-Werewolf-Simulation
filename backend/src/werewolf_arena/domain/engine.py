@@ -53,13 +53,12 @@ class GameEngine:
             return self._reject(state, command, "unknown_actor")
         if not actor.alive:
             return self._reject(state, command, "dead_actor")
-        if command.kind is CommandKind.VOTE and state.phase is not Phase.DAY_VOTE:
-            return self._reject(state, command, "wrong_phase")
         allowed = {
-            Phase.NIGHT_WOLF: {CommandKind.WOLF_KILL},
-            Phase.NIGHT_SEER: {CommandKind.INSPECT},
-            Phase.NIGHT_WITCH: {CommandKind.WITCH_SAVE, CommandKind.WITCH_POISON},
-            Phase.DAY_VOTE: {CommandKind.VOTE},
+            Phase.NIGHT_WOLF: {CommandKind.WOLF_KILL, CommandKind.NOOP},
+            Phase.NIGHT_SEER: {CommandKind.INSPECT, CommandKind.NOOP},
+            Phase.NIGHT_WITCH: {CommandKind.WITCH_SAVE, CommandKind.WITCH_POISON, CommandKind.NOOP},
+            Phase.DAY_DISCUSSION: {CommandKind.SPEAK, CommandKind.END_DISCUSSION},
+            Phase.DAY_VOTE: {CommandKind.VOTE, CommandKind.ABSTAIN},
         }
         if command.kind not in allowed.get(state.phase, set()):
             return self._reject(state, command, "wrong_phase")
@@ -70,11 +69,29 @@ class GameEngine:
         }.get(state.phase)
         if expected_role is not None and actor.role_id != expected_role:
             return self._reject(state, command, "wrong_role")
-        if command.target_id is None or not any(
-            item.participant_id == command.target_id and item.alive for item in state.participants
+        if command.kind is CommandKind.SPEAK:
+            if not command.text.strip() or len(command.text) > 500:
+                return self._reject(state, command, "invalid_speech")
+            return state.append_event(
+                "public_speech", {"actor_id": actor.participant_id, "text": command.text.strip()}, Visibility.PUBLIC
+            )
+        if command.kind is CommandKind.END_DISCUSSION:
+            return self._change_phase(
+                state, Phase.DAY_VOTE
+            ).append_event("discussion_ended", {"actor_id": actor.participant_id}, Visibility.PUBLIC)
+        needs_target = command.kind in {
+            CommandKind.WOLF_KILL,
+            CommandKind.INSPECT,
+            CommandKind.WITCH_SAVE,
+            CommandKind.WITCH_POISON,
+            CommandKind.VOTE,
+        }
+        if needs_target and (
+            command.target_id is None
+            or not any(item.participant_id == command.target_id and item.alive for item in state.participants)
         ):
             return self._reject(state, command, "invalid_target")
-        if command.target_id == command.actor_id:
+        if needs_target and command.target_id == command.actor_id:
             return self._reject(state, command, "self_target_forbidden")
         if any(item.actor_id == command.actor_id for item in state.pending_commands):
             return self._reject(state, command, "duplicate_command")
@@ -93,10 +110,10 @@ class GameEngine:
 
         if state.phase is Phase.NIGHT_WOLF:
             wolves = [item for item in state.participants if item.alive and item.role_id == "wolf"]
-            commands = [item for item in state.pending_commands if item.kind is CommandKind.WOLF_KILL]
+            commands = [item for item in state.pending_commands if item.actor_id in {wolf.participant_id for wolf in wolves}]
             if {item.actor_id for item in commands} != {item.participant_id for item in wolves}:
                 return state
-            targets = {item.target_id for item in commands}
+            targets = {item.target_id for item in commands if item.kind is CommandKind.WOLF_KILL}
             state = state.model_copy(update={"pending_commands": ()})
             if len(targets) == 1:
                 state = state.append_event("night_victim", {"target_id": targets.pop()}, Visibility.SERVER)
@@ -104,53 +121,75 @@ class GameEngine:
                 state = state.append_event("wolf_attack_failed", {}, Visibility.SERVER)
             return self._change_phase(state, Phase.NIGHT_SEER)
         if state.phase is Phase.NIGHT_SEER:
-            seer = next(item for item in state.participants if item.alive and item.role_id == "seer")
+            seer = next((item for item in state.participants if item.alive and item.role_id == "seer"), None)
+            if seer is None:
+                return self._change_phase(state, Phase.NIGHT_WITCH)
             command = next((item for item in state.pending_commands if item.actor_id == seer.participant_id), None)
             if command is None:
                 return state
-            target = next(item for item in state.participants if item.participant_id == command.target_id)
             state = state.model_copy(update={"pending_commands": ()})
-            state = state.append_event(
-                "inspection_result",
-                {"target_id": target.participant_id, "is_wolf": target.role_id == "wolf"},
-                Visibility.PRIVATE,
-                frozenset({seer.participant_id}),
-            )
+            if command.kind is CommandKind.INSPECT:
+                target = next(item for item in state.participants if item.participant_id == command.target_id)
+                state = state.append_event(
+                    "inspection_result",
+                    {"target_id": target.participant_id, "is_wolf": target.role_id == "wolf"},
+                    Visibility.PRIVATE,
+                    frozenset({seer.participant_id}),
+                )
             return self._change_phase(state, Phase.NIGHT_WITCH)
         if state.phase is Phase.NIGHT_WITCH:
-            witch = next(item for item in state.participants if item.alive and item.role_id == "witch")
-            command = next((item for item in state.pending_commands if item.actor_id == witch.participant_id), None)
+            witch = next((item for item in state.participants if item.alive and item.role_id == "witch"), None)
+            command = (
+                next((item for item in state.pending_commands if item.actor_id == witch.participant_id), None)
+                if witch is not None
+                else GameCommand(actor_id="system", kind=CommandKind.NOOP)
+            )
             if command is None:
                 return state
             victim = self._night_victim(state)
             saved = command.kind is CommandKind.WITCH_SAVE and command.target_id == victim
             poisoned = command.target_id if command.kind is CommandKind.WITCH_POISON else None
-            dead_ids = {item for item in (victim, poisoned) if item is not None and item != command.target_id if not saved}
-            resource_key = "antidote_available" if command.kind is CommandKind.WITCH_SAVE else "poison_available"
-            updated_private_state = {**witch.private_state, resource_key: False}
+            dead_ids = {item for item in (victim, poisoned) if item is not None}
+            if saved and victim is not None:
+                dead_ids.discard(victim)
+            resource_key = (
+                "antidote_available"
+                if command.kind is CommandKind.WITCH_SAVE
+                else "poison_available"
+                if command.kind is CommandKind.WITCH_POISON
+                else None
+            )
+            updated_private_state = (
+                {**witch.private_state, resource_key: False} if witch is not None and resource_key is not None else {}
+            )
             participants = tuple(
                 item.model_copy(update={"alive": False})
                 if item.participant_id in dead_ids
                 else item.model_copy(update={"private_state": updated_private_state})
-                if item.participant_id == witch.participant_id
+                if witch is not None and item.participant_id == witch.participant_id and resource_key is not None
                 else item
                 for item in state.participants
             )
             state = state.model_copy(update={"participants": participants, "pending_commands": ()})
             state = state.append_event("night_announcement", {"death_count": len(dead_ids)}, Visibility.PUBLIC)
-            return self._change_phase(state, Phase.DAY_DISCUSSION)
+            return self._finish_if_winner(self._change_phase(state, Phase.DAY_DISCUSSION))
         if state.phase is Phase.DAY_VOTE:
             alive = [item for item in state.participants if item.alive]
-            commands = [item for item in state.pending_commands if item.kind is CommandKind.VOTE]
+            commands = [item for item in state.pending_commands if item.kind in {CommandKind.VOTE, CommandKind.ABSTAIN}]
             if {item.actor_id for item in commands} != {item.participant_id for item in alive}:
                 return state
             counts: dict[str, int] = {}
             for command in commands:
-                counts[command.target_id or ""] = counts.get(command.target_id or "", 0) + 1
+                if command.kind is CommandKind.VOTE and command.target_id is not None:
+                    counts[command.target_id] = counts.get(command.target_id, 0) + 1
+            if not counts:
+                state = state.append_event("vote_no_execution", {}, Visibility.PUBLIC)
+                return self._finish_if_winner(self._change_phase(state, Phase.NIGHT_WOLF))
             highest = max(counts.values())
             winning_targets = [target for target, count in counts.items() if count == highest]
             state = state.model_copy(update={"pending_commands": ()})
             if len(winning_targets) > 1:
+                state = self._finish_if_winner(self._change_phase(state, Phase.NIGHT_WOLF))
                 return state.append_event("vote_tied", {"targets": winning_targets}, Visibility.PUBLIC)
             executed = winning_targets[0]
             participants = tuple(
