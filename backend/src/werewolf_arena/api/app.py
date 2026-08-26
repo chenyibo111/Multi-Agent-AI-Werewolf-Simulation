@@ -7,8 +7,10 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from werewolf_arena.agents.config import LLMConfigurationError, LLMSettings
 from werewolf_arena.agents.model_client import AsyncModelClient, OpenAICompatibleClient
@@ -68,4 +70,21 @@ def create_app(database_path: Path | None = None, model_client: AsyncModelClient
     )
     app.include_router(rooms_router)
     app.include_router(events_router)
+    frontend_dist = Path(
+        os.environ.get(
+            "WEREWOLF_ARENA_FRONTEND_DIST",
+            str(Path(__file__).resolve().parents[4] / "frontend" / "dist"),
+        )
+    )
+    assets_directory = frontend_dist / "assets"
+    if frontend_dist.is_dir() and (frontend_dist / "index.html").is_file():
+        if assets_directory.is_dir():
+            app.mount("/assets", StaticFiles(directory=assets_directory), name="frontend-assets")
+
+        @app.get("/{client_path:path}", include_in_schema=False)
+        async def spa_fallback(client_path: str) -> FileResponse:
+            if client_path.startswith(("api/", "docs", "openapi.json")):
+                raise HTTPException(status_code=404)
+            return FileResponse(frontend_dist / "index.html")
+
     return app
