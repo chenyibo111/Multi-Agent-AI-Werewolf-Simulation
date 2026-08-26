@@ -16,6 +16,7 @@ const payload: RoomPayload = {
     human_actions: ["inspect"],
     legal_target_ids: ["ai-1"],
     phase_text: "预言家查验",
+    view_mode: "active",
   },
   events: [{ sequence: 7, event_type: "phase_changed", payload: {}, visibility: "public" }],
 };
