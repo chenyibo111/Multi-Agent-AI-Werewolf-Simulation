@@ -1,0 +1,147 @@
+"""Server-side automatic turn scheduling for AI-controlled participants."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Protocol
+
+from werewolf_arena.domain.engine import GameEngine
+from werewolf_arena.domain.enums import CommandKind, Phase
+from werewolf_arena.domain.models import AgentUsage, GameCommand, GameState, Participant
+
+from .models import AgentDecision, AgentObservation
+from .observation import build_observation
+
+
+class DecisionPolicy(Protocol):
+    """The small policy contract required by the scheduler and test doubles."""
+
+    async def decide(self, observation: AgentObservation) -> AgentDecision:
+        """Propose a server-constrained decision for its bound participant."""
+
+
+@dataclass(frozen=True)
+class OrchestrationResult:
+    """A settled state plus the exact point at which human input is required."""
+
+    state: GameState
+    waiting_for_human: bool
+    human_actions: tuple[CommandKind, ...] = ()
+
+
+class GameOrchestrator:
+    """Advance AI turns deterministically and pause whenever the human must choose."""
+
+    def __init__(self, engine: GameEngine, policies: Mapping[str, DecisionPolicy]) -> None:
+        self._engine = engine
+        self._policies = policies
+
+    async def advance(self, state: GameState) -> OrchestrationResult:
+        """Run all safe automatic work until a live human action or terminal state."""
+        while state.phase is not Phase.FINISHED:
+            actors = self._actors_for_phase(state)
+            human = next((item for item in actors if item.is_human), None)
+            if human is not None:
+                return OrchestrationResult(state, True, self._human_actions(state, human))
+            if state.phase is Phase.NIGHT_WOLF:
+                state = await self._run_wolf_team(state, actors)
+            elif state.phase in {Phase.NIGHT_SEER, Phase.NIGHT_WITCH, Phase.DAY_VOTE}:
+                state = await self._run_individual_phase(state, actors)
+            elif state.phase is Phase.DAY_DISCUSSION:
+                state, waiting = await self._run_discussion(state)
+                if waiting:
+                    return OrchestrationResult(state, True, self._human_actions(state, self._human(state)))
+            else:
+                return OrchestrationResult(state, False)
+            advanced = self._engine.advance_automatic(state)
+            if advanced == state:
+                return OrchestrationResult(state, False)
+            state = advanced
+        return OrchestrationResult(state, False)
+
+    async def _run_wolf_team(self, state: GameState, actors: tuple[Participant, ...]) -> GameState:
+        if not actors:
+            return state
+        coordinator = actors[0]
+        decision, state = await self._decision(state, coordinator)
+        target_id = decision.target_id if decision.kind is CommandKind.WOLF_KILL else self._first_non_wolf_target(state)
+        if target_id is None:
+            return state
+        for actor in actors:
+            state = self._engine.submit(
+                state,
+                GameCommand(actor_id=actor.participant_id, kind=CommandKind.WOLF_KILL, target_id=target_id),
+            )
+        return state
+
+    async def _run_individual_phase(self, state: GameState, actors: tuple[Participant, ...]) -> GameState:
+        for actor in actors:
+            decision, state = await self._decision(state, actor)
+            state = self._engine.submit(state, decision.to_command(actor.participant_id))
+        return state
+
+    async def _run_discussion(self, state: GameState) -> tuple[GameState, bool]:
+        spoken_ids = {
+            event.payload.get("actor_id")
+            for event in state.events
+            if event.event_type == "public_speech" and isinstance(event.payload.get("actor_id"), str)
+        }
+        ai_players = tuple(item for item in state.participants if item.alive and not item.is_human)
+        for actor in ai_players:
+            if actor.participant_id in spoken_ids:
+                continue
+            decision, state = await self._decision(state, actor)
+            text = decision.speech or "我暂时没有更多信息。"
+            state = self._engine.submit(
+                state,
+                GameCommand(actor_id=actor.participant_id, kind=CommandKind.SPEAK, text=text),
+            )
+        human = self._human(state)
+        return state, human.alive
+
+    async def _decision(self, state: GameState, actor: Participant) -> tuple[AgentDecision, GameState]:
+        policy = self._policies.get(actor.participant_id)
+        decision = (
+            await policy.decide(build_observation(state, actor.participant_id))
+            if policy is not None
+            else AgentDecision(kind=CommandKind.NOOP, failure_kind="missing_policy")
+        )
+        usage = state.agent_usage
+        updated_usage = AgentUsage(
+            model_calls=usage.model_calls + (1 if policy is not None else 0),
+            input_tokens=usage.input_tokens + decision.input_tokens,
+            output_tokens=usage.output_tokens + decision.output_tokens,
+            cost_usd=usage.cost_usd + decision.cost_usd,
+        )
+        return decision, state.model_copy(update={"agent_usage": updated_usage})
+
+    @staticmethod
+    def _actors_for_phase(state: GameState) -> tuple[Participant, ...]:
+        role_for_phase = {
+            Phase.NIGHT_WOLF: "wolf",
+            Phase.NIGHT_SEER: "seer",
+            Phase.NIGHT_WITCH: "witch",
+        }.get(state.phase)
+        if role_for_phase is not None:
+            return tuple(item for item in state.participants if item.alive and item.role_id == role_for_phase)
+        if state.phase is Phase.DAY_VOTE:
+            return tuple(item for item in state.participants if item.alive)
+        return ()
+
+    @staticmethod
+    def _human_actions(state: GameState, human: Participant) -> tuple[CommandKind, ...]:
+        if state.phase is Phase.DAY_DISCUSSION:
+            return (CommandKind.SPEAK, CommandKind.END_DISCUSSION)
+        return build_observation(state, human.participant_id).legal_kinds
+
+    @staticmethod
+    def _first_non_wolf_target(state: GameState) -> str | None:
+        return next(
+            (item.participant_id for item in state.participants if item.alive and item.role_id != "wolf"),
+            None,
+        )
+
+    @staticmethod
+    def _human(state: GameState) -> Participant:
+        return next(item for item in state.participants if item.is_human)
