@@ -1,0 +1,2 @@
+import type { ConnectionStatus as Status } from "./use-room-session";
+export function ConnectionStatus({ status, onRefresh, onContinue }: { status: Status; onRefresh: () => void; onContinue: () => void }) { return <section className="connection"><span>{status === "connected" ? "已连接" : status === "offline" ? "连接已断开" : "AI 正在行动"}</span>{status === "offline" && <div><button onClick={onRefresh}>刷新局面</button><button onClick={onContinue}>继续自动推进</button></div>}</section>; }

@@ -11,3 +11,4 @@ body { margin: 0; min-width: 320px; min-height: 100vh; }
 button, input, select, textarea { font: inherit; }
 
 .app-shell { display: grid; min-height: 100vh; place-items: center; }
+.landing { max-width: 760px; margin: 0 auto; padding: 14vh 24px; } .landing h1 { max-width:700px; font-size:clamp(2.6rem,7vw,5.4rem); line-height:1.05; } .eyebrow { color:#e7c873; letter-spacing:.12em; text-transform:uppercase; } .create-form { display:grid; max-width:380px; gap:8px; margin:34px 0; } select,textarea { border:1px solid #59649b; border-radius:8px; padding:10px; color:#f0efff; background:#171d3b; } .subtle-button { color:#c5bff1; background:none; border:0; cursor:pointer; }
