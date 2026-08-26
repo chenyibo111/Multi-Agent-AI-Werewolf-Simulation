@@ -8,7 +8,7 @@ from uuid import UUID
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from werewolf_arena.domain.models import GameState
+from werewolf_arena.domain.models import GameEvent, GameState
 
 from .models import Base, EventRow, PlayerSessionRow, RoomRow, SnapshotRow
 
@@ -41,6 +41,17 @@ class SQLiteRoomRepository:
             if snapshot is None:
                 raise KeyError(f"room snapshot not found: {room_id}")
             return GameState.model_validate_json(snapshot.state_json)
+
+    async def events_after(self, room_id: UUID, after_sequence: int) -> tuple[GameEvent, ...]:
+        """Load authoritative events newer than a browser's acknowledged sequence."""
+        statement = (
+            select(EventRow)
+            .where(EventRow.room_id == str(room_id), EventRow.sequence > after_sequence)
+            .order_by(EventRow.sequence)
+        )
+        async with self._sessions() as session:
+            rows = (await session.execute(statement)).scalars().all()
+        return tuple(GameEvent.model_validate_json(row.event_json) for row in rows)
 
     async def issue_session(self, room_id: UUID, participant_id: str) -> str:
         """Return a new browser credential while persisting only its hash."""

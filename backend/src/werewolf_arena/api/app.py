@@ -15,6 +15,7 @@ from werewolf_arena.persistence.repository import SQLiteRoomRepository
 from werewolf_arena.roles.standard import standard_role_registry
 from werewolf_arena.runtime.registry import RoomRuntimeRegistry
 
+from .routes.events import router as events_router
 from .routes.rooms import router as rooms_router
 
 
@@ -41,4 +42,5 @@ def create_app(database_path: Path | None = None) -> FastAPI:
         allow_headers=["Authorization", "Content-Type"],
     )
     app.include_router(rooms_router)
+    app.include_router(events_router)
     return app

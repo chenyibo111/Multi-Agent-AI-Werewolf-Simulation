@@ -9,6 +9,7 @@ from uuid import UUID
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from werewolf_arena.domain.models import GameState, Participant
 from werewolf_arena.domain.projection import ViewerContext, ViewerKind
 from werewolf_arena.runtime.registry import RoomRuntimeRegistry
 from werewolf_arena.runtime.room_runtime import RoomRuntime
@@ -49,6 +50,11 @@ async def require_room_session(
     participant = next((item for item in state.participants if item.participant_id == participant_id), None)
     if participant is None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Invalid room participant")
+    return AuthorizedRoom(participant_id, viewer_for_participant(state, participant), runtime)
+
+
+def viewer_for_participant(state: GameState, participant: Participant) -> ViewerContext:
+    """Derive exactly the safe projection capability for a known room participant."""
     viewer_kind = (
         ViewerKind.FINISHED_REPLAY
         if state.status.value == "finished"
@@ -56,4 +62,4 @@ async def require_room_session(
         if participant.alive
         else ViewerKind.DEAD_SPECTATOR
     )
-    return AuthorizedRoom(participant_id, ViewerContext(participant_id, viewer_kind), runtime)
+    return ViewerContext(participant.participant_id, viewer_kind)
