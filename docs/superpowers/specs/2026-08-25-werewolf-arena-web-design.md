@@ -1,6 +1,6 @@
 # Werewolf Arena 本地单人 Web 产品设计
 
-**状态：已确认，Phase 1 实施中**
+**状态：已确认，Phase 2 已完成（本地运行时与 API）**
 **日期：2026-08-25**  
 **仓库：`D:\AI\werewolf_arena`**
 
