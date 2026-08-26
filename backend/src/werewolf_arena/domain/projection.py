@@ -70,6 +70,17 @@ def project_events(
     return tuple(visible)
 
 
+def project_finished_report(state: GameState) -> dict[str, object]:
+    """Return the completed game's safe final replay without changing live projections."""
+    viewer = ViewerContext("finished-report", ViewerKind.FINISHED_REPLAY)
+    state_view = project_state(state, viewer)
+    return {
+        "winner_faction": state.winner_faction.value if state.winner_faction is not None else None,
+        "participants": state_view["participants"],
+        "events": project_events(state.events, viewer, state),
+    }
+
+
 def _can_view(event: GameEvent, viewer: ViewerContext) -> bool:
     if viewer.kind is ViewerKind.FINISHED_REPLAY:
         return event.visibility is not Visibility.SERVER

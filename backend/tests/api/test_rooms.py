@@ -67,6 +67,16 @@ def test_rejected_command_returns_safe_validation_response(tmp_path) -> None:
     assert payload["detail"] == "self_target_forbidden"
 
 
+def test_running_room_rejects_finished_report_request(tmp_path) -> None:
+    """The report route cannot turn an in-progress room into an identity leak."""
+    app = create_app(database_path=tmp_path / "werewolf.db")
+    with TestClient(app) as client:
+        created = client.post("/api/rooms", json={"requested_role_id": "villager"}).json()
+        response = client.get(f"/api/rooms/{created['room_id']}/report")
+
+    assert response.status_code == 409
+
+
 def test_room_resumes_after_application_restart(tmp_path) -> None:
     """A fresh application instance loads the durable snapshot for its existing token."""
     database_path = tmp_path / "werewolf.db"

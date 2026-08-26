@@ -15,6 +15,7 @@ from werewolf_arena.domain.projection import (
     ViewerContext,
     ViewerKind,
     project_events,
+    project_finished_report,
     project_state,
 )
 
@@ -67,6 +68,17 @@ async def get_room(
         "state": _state_view(state, authorized.viewer, current.waiting_for_human, current.human_actions),
         "events": project_events(state.events, authorized.viewer, state),
     }
+
+
+@router.get("/{room_id}/report")
+async def get_finished_report(
+    authorized: Annotated[AuthorizedRoom, Depends(require_room_session)],
+) -> dict[str, object]:
+    """Return a safe complete replay only after the room has reached a result."""
+    state = await authorized.runtime.get_state()
+    if state.status.value != "finished":
+        raise HTTPException(status.HTTP_409_CONFLICT, "Room is still in progress")
+    return project_finished_report(state)
 
 
 @router.post("/{room_id}/commands")

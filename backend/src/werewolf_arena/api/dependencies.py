@@ -60,11 +60,6 @@ async def require_room_session(
 
 def viewer_for_participant(state: GameState, participant: Participant) -> ViewerContext:
     """Derive exactly the safe projection capability for a known room participant."""
-    viewer_kind = (
-        ViewerKind.FINISHED_REPLAY
-        if state.status.value == "finished"
-        else ViewerKind.ALIVE_HUMAN
-        if participant.alive
-        else ViewerKind.DEAD_SPECTATOR
-    )
+    del state
+    viewer_kind = ViewerKind.ALIVE_HUMAN if participant.alive else ViewerKind.DEAD_SPECTATOR
     return ViewerContext(participant.participant_id, viewer_kind)

@@ -1,11 +1,12 @@
 from werewolf_arena.domain.engine import GameEngine, replay
-from werewolf_arena.domain.enums import CommandKind, Phase, Visibility
+from werewolf_arena.domain.enums import CommandKind, GameStatus, Phase, Visibility
 from werewolf_arena.domain.mode import standard_six_player_mode
 from werewolf_arena.domain.models import GameCommand
 from werewolf_arena.domain.projection import (
     ViewerContext,
     ViewerKind,
     project_events,
+    project_finished_report,
     project_state,
 )
 from werewolf_arena.roles.standard import standard_role_registry
@@ -48,6 +49,22 @@ def test_dead_human_sees_only_public_events_until_finished() -> None:
     events = project_events(state.events, viewer, state)
 
     assert all(event["visibility"] == Visibility.PUBLIC.value for event in events)
+
+
+def test_finished_report_reveals_roles_without_putting_them_in_live_snapshot() -> None:
+    """Final identities belong to a report, not to the ordinary room projection."""
+    engine = GameEngine(standard_role_registry(), standard_six_player_mode(), seed=7)
+    running_state = engine.create_game("human", requested_role_id="villager")
+    finished_state = running_state.model_copy(update={"status": GameStatus.FINISHED})
+    alive_view = ViewerContext("human", ViewerKind.ALIVE_HUMAN)
+    wolf = next(player for player in finished_state.participants if player.role_id == "wolf")
+
+    snapshot = project_state(finished_state, alive_view)
+    report = project_finished_report(finished_state)
+
+    assert "role_id" not in snapshot["participants"][wolf.participant_id]
+    assert report["participants"][wolf.participant_id]["role_id"] == "wolf"
+    assert all(event["visibility"] != Visibility.SERVER.value for event in report["events"])
 
 
 def test_replay_reproduces_a_deterministic_vote_resolution() -> None:
