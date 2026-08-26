@@ -62,3 +62,18 @@ def test_rejected_command_returns_safe_validation_response(tmp_path) -> None:
     assert response.status_code == 422
     payload = response.json()
     assert payload["detail"] == "wrong_role"
+
+
+def test_room_resumes_after_application_restart(tmp_path) -> None:
+    """A fresh application instance loads the durable snapshot for its existing token."""
+    database_path = tmp_path / "werewolf.db"
+    with TestClient(create_app(database_path=database_path)) as first_client:
+        created = first_client.post("/api/rooms", json={"requested_role_id": "wolf"}).json()
+
+    headers = {"Authorization": f"Bearer {created['session_token']}"}
+    with TestClient(create_app(database_path=database_path)) as restarted_client:
+        resumed = restarted_client.get(f"/api/rooms/{created['room_id']}", headers=headers)
+
+    assert resumed.status_code == 200
+    assert resumed.json()["state"]["game_id"] == created["room_id"]
+    assert [event["sequence"] for event in resumed.json()["events"]] == [2]

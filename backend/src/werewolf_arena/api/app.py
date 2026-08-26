@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -21,7 +22,8 @@ from .routes.rooms import router as rooms_router
 
 def create_app(database_path: Path | None = None) -> FastAPI:
     """Build a local API whose dependencies can later be replaced for deployment."""
-    repository = SQLiteRoomRepository(database_path or Path("werewolf_arena.db"))
+    configured_database = Path(os.environ.get("WEREWOLF_ARENA_DATABASE_PATH", "werewolf_arena.db"))
+    repository = SQLiteRoomRepository(database_path or configured_database)
     engine = GameEngine(standard_role_registry(), standard_six_player_mode(), seed=7)
     runtime_registry = RoomRuntimeRegistry(engine, repository)
 
