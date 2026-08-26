@@ -58,3 +58,22 @@ def test_sqlite_repository_appends_new_events_without_deleting_existing_audit_ro
         assert events[-1].event_type == "audit_marker"
 
     asyncio.run(scenario())
+
+
+def test_sqlite_repository_delete_removes_the_room_authority_record(tmp_path) -> None:
+    """Deleting a room leaves no persisted record that can later be resumed."""
+
+    async def scenario() -> None:
+        engine = GameEngine(standard_role_registry(), standard_six_player_mode(), seed=7)
+        state = engine.create_game("human", requested_role_id="villager")
+        repository = SQLiteRoomRepository(tmp_path / "werewolf.db")
+        await repository.initialize()
+        await repository.create_room(state)
+        await repository.save_state(state)
+
+        await repository.delete_room(state.game_id)
+
+        assert await repository.room_exists(state.game_id) is False
+        assert await repository.events_after(state.game_id, after_sequence=0) == ()
+
+    asyncio.run(scenario())
