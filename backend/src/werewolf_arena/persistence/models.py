@@ -24,3 +24,13 @@ class EventRow(Base):
     room_id: Mapped[str] = mapped_column(String, primary_key=True)
     sequence: Mapped[int] = mapped_column(Integer, primary_key=True)
     event_json: Mapped[str] = mapped_column(Text)
+
+
+class PlayerSessionRow(Base):
+    """One opaque local-browser credential, stored only as a SHA-256 digest."""
+
+    __tablename__ = "player_sessions"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    room_id: Mapped[str] = mapped_column(String, index=True)
+    participant_id: Mapped[str] = mapped_column(String)
