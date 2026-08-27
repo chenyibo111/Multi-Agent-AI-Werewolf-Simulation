@@ -10,6 +10,7 @@ from werewolf_arena.agents.orchestrator import GameOrchestrator
 from werewolf_arena.domain.engine import GameEngine
 from werewolf_arena.domain.enums import CommandKind, Phase
 from werewolf_arena.domain.mode import standard_six_player_mode
+from werewolf_arena.domain.models import GameCommand
 from werewolf_arena.persistence.repository import SQLiteRoomRepository
 from werewolf_arena.roles.standard import standard_role_registry
 from werewolf_arena.runtime.room_runtime import RoomRuntime
@@ -117,5 +118,39 @@ def test_runtime_enforces_budget_and_persists_redacted_agent_run_metrics(tmp_pat
         assert len(records) == 1
         assert records[0].status == "success"
         assert records[0].participant_id != "human"
+
+    asyncio.run(scenario())
+
+
+def test_submitted_human_vote_starts_ai_votes_without_a_duplicate_command() -> None:
+    """A human's accepted vote is a completed turn, not another vote prompt."""
+
+    class AbstainPolicy:
+        async def decide(self, observation):
+            assert observation.phase is Phase.DAY_VOTE
+            return AgentDecision(kind=CommandKind.ABSTAIN)
+
+    async def scenario() -> None:
+        engine = GameEngine(standard_role_registry(), standard_six_player_mode(), seed=7)
+        state = engine.create_game("human", requested_role_id="villager").model_copy(
+            update={"phase": Phase.DAY_VOTE}
+        )
+        state = engine.submit(state, GameCommand(actor_id="human", kind=CommandKind.VOTE, target_id="ai-1"))
+        policies = {
+            participant.participant_id: AbstainPolicy()
+            for participant in state.participants
+            if not participant.is_human
+        }
+        orchestrator = GameOrchestrator(engine, policies)
+
+        assert orchestrator.wait_status(state).waiting_for_human is False
+        advanced = await orchestrator._run_individual_phase(
+            state, orchestrator._actors_for_phase(state), []
+        )
+
+        assert {command.actor_id for command in advanced.pending_commands} == {
+            participant.participant_id for participant in state.participants
+        }
+        assert not any(event.event_type == "command_rejected" for event in advanced.events)
 
     asyncio.run(scenario())

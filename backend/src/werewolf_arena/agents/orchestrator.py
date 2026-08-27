@@ -53,7 +53,7 @@ class GameOrchestrator:
         while state.phase is not Phase.FINISHED:
             actors = self._actors_for_phase(state)
             human = next((item for item in actors if item.is_human), None)
-            if human is not None:
+            if human is not None and not self._has_submitted_command(state, human.participant_id):
                 return OrchestrationResult(state, True, self._human_actions(state, human), tuple(agent_runs))
             if state.phase is Phase.NIGHT_WOLF:
                 state = await self._run_wolf_team(state, actors, agent_runs)
@@ -82,7 +82,7 @@ class GameOrchestrator:
             return OrchestrationResult(state, False)
         actors = self._actors_for_phase(state)
         human = next((item for item in actors if item.is_human), None)
-        if human is not None:
+        if human is not None and not self._has_submitted_command(state, human.participant_id):
             return OrchestrationResult(state, True, self._human_actions(state, human))
         if state.phase is Phase.DAY_DISCUSSION:
             human = self._human(state)
@@ -98,12 +98,28 @@ class GameOrchestrator:
     ) -> GameState:
         if not actors:
             return state
-        coordinator = actors[0]
-        decision, state = await self._decision(state, coordinator, agent_runs)
-        target_id = decision.target_id if decision.kind is CommandKind.WOLF_KILL else self._first_non_wolf_target(state)
-        if target_id is None:
-            return state
+        submitted_commands = tuple(
+            command for command in state.pending_commands if command.actor_id in {actor.participant_id for actor in actors}
+        )
+        submitted_kill = next(
+            (command for command in submitted_commands if command.kind is CommandKind.WOLF_KILL), None
+        )
+        if submitted_kill is not None:
+            target_id = submitted_kill.target_id
+        elif submitted_commands:
+            target_id = None
+        else:
+            coordinator = actors[0]
+            decision, state = await self._decision(state, coordinator, agent_runs)
+            target_id = decision.target_id if decision.kind is CommandKind.WOLF_KILL else self._first_non_wolf_target(state)
         for actor in actors:
+            if self._has_submitted_command(state, actor.participant_id):
+                continue
+            if target_id is None:
+                state = self._engine.submit(
+                    state, GameCommand(actor_id=actor.participant_id, kind=CommandKind.NOOP)
+                )
+                continue
             state = self._engine.submit(
                 state,
                 GameCommand(actor_id=actor.participant_id, kind=CommandKind.WOLF_KILL, target_id=target_id),
@@ -117,6 +133,8 @@ class GameOrchestrator:
         agent_runs: list[AgentRunRecord],
     ) -> GameState:
         for actor in actors:
+            if self._has_submitted_command(state, actor.participant_id):
+                continue
             decision, state = await self._decision(state, actor, agent_runs)
             if state.phase is Phase.DAY_VOTE and decision.kind not in {CommandKind.VOTE, CommandKind.ABSTAIN}:
                 decision = AgentDecision(kind=CommandKind.ABSTAIN, failure_kind=decision.failure_kind)
@@ -158,6 +176,11 @@ class GameOrchestrator:
             for participant in state.participants
             if participant.alive and not participant.is_human
         )
+
+    @staticmethod
+    def _has_submitted_command(state: GameState, participant_id: str) -> bool:
+        """An accepted command completes that participant's turn for the active phase."""
+        return any(command.actor_id == participant_id for command in state.pending_commands)
 
     async def _decision(
         self,

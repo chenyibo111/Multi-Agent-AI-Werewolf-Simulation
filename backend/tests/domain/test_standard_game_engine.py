@@ -1,6 +1,6 @@
 from werewolf_arena.domain.engine import GameEngine
 from werewolf_arena.domain.enums import CommandKind, Faction, GameStatus, Phase
-from werewolf_arena.domain.mode import standard_six_player_mode
+from werewolf_arena.domain.mode import GameMode, standard_six_player_mode
 from werewolf_arena.domain.models import GameCommand
 from werewolf_arena.roles.standard import standard_role_registry
 
@@ -18,6 +18,30 @@ def test_requested_human_role_is_reserved_and_roster_is_valid() -> None:
     assert human.role_id == "seer"
     assert len(state.participants) == 6
     assert sum(player.role_id == "wolf" for player in state.participants) == 2
+
+
+def test_ai_roster_uses_stable_ids_and_human_friendly_chinese_names() -> None:
+    state = standard_engine(seed=7).create_game("human", requested_role_id="seer")
+
+    ai_players = [player for player in state.participants if not player.is_human]
+    assert [player.participant_id for player in ai_players] == ["ai-1", "ai-2", "ai-3", "ai-4", "ai-5"]
+    assert [player.display_name for player in ai_players] == ["林小雨", "周子墨", "陈星河", "苏晚", "顾言"]
+
+
+def test_larger_valid_modes_receive_a_fallback_ai_display_name() -> None:
+    seven_player_mode = GameMode(
+        mode_id="seven_player",
+        version="1.0.0",
+        player_count=7,
+        role_slots=("wolf", "wolf", "seer", "witch", "villager", "villager", "villager"),
+        phase_order=(Phase.NIGHT_WOLF,),
+    )
+    engine = GameEngine(standard_role_registry(), seven_player_mode, seed=7)
+
+    state = engine.create_game("human", requested_role_id="villager")
+
+    assert state.participants[-1].participant_id == "ai-6"
+    assert state.participants[-1].display_name == "新朋友6"
 
 
 def test_dead_participant_command_is_rejected_without_state_change() -> None:
@@ -110,6 +134,7 @@ def test_tied_day_votes_do_not_execute_any_player() -> None:
     state = engine.advance_automatic(state)
 
     assert all(player.alive for player in state.participants)
+    assert any(event.event_type == "vote_result" for event in state.events)
     assert state.events[-1].event_type == "vote_tied"
 
 
