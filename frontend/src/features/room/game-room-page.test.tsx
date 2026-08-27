@@ -81,6 +81,38 @@ describe("RoomTimeline", () => {
     expect(document.body.textContent).not.toContain("never render");
   });
 
+  it("renders witch target and action-result events with player names", () => {
+    render(
+      <RoomTimeline
+        participants={{ "ai-1": { participant_id: "ai-1", display_name: "林小雨", alive: true } }}
+        events={[
+          {
+            sequence: 3,
+            event_type: "witch_night_target",
+            payload: { target_id: "ai-1" },
+            visibility: "private",
+          },
+          {
+            sequence: 4,
+            event_type: "witch_action_result",
+            payload: {
+              saved_target_id: "ai-1",
+              poisoned_target_id: null,
+              antidote_available: false,
+              poison_available: true,
+              secret: "never render",
+            },
+            visibility: "private",
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("女巫得知：今晚被袭击的是林小雨。")) .toBeVisible();
+    expect(screen.getByText("女巫行动：救下林小雨；解药已用，毒药可用。")) .toBeVisible();
+    expect(document.body.textContent).not.toContain("never render");
+  });
+
   it("names the players who died in a public dawn announcement", () => {
     render(
       <RoomTimeline
@@ -186,6 +218,24 @@ describe("PrivatePanel", () => {
     render(<PrivatePanel state={{ ...waitingSeerState, participants: { ...waitingSeerState.participants, human: { participant_id: "human", display_name: "你", alive: true, role_id: "wolf" } }, wolf_teammates: [{ participant_id: "ai-1", display_name: "林小雨", seat_number: 2, alive: true }] }} />);
 
     expect(screen.getByText("你的狼人同伴：2号 林小雨")).toBeVisible();
+  });
+
+  it("shows a witch their current antidote and poison availability", () => {
+    render(<PrivatePanel state={{
+      ...waitingSeerState,
+      participants: {
+        ...waitingSeerState.participants,
+        human: {
+          participant_id: "human",
+          display_name: "你",
+          alive: true,
+          role_id: "witch",
+          private_state: { antidote_available: true, poison_available: false },
+        },
+      },
+    }} />);
+
+    expect(screen.getByText("解药：可用；毒药：已用")).toBeVisible();
   });
 });
 

@@ -47,10 +47,11 @@ def test_projection_omits_a_missing_legacy_seat_number() -> None:
     assert "seat_number" not in view["participants"][legacy_human.participant_id]
 
 
-def test_dead_human_sees_only_public_events_until_finished() -> None:
+def test_dead_human_receives_all_game_events_and_roles_without_server_payloads() -> None:
     engine = GameEngine(standard_role_registry(), standard_six_player_mode(), seed=7)
     state = engine.create_game("human", requested_role_id="villager")
     seer = next(player for player in state.participants if player.role_id == "seer")
+    witch = next(player for player in state.participants if player.role_id == "witch")
     state = state.model_copy(
         update={
             "participants": tuple(
@@ -58,12 +59,31 @@ def test_dead_human_sees_only_public_events_until_finished() -> None:
                 for player in state.participants
             )
         }
-    ).append_event("inspection_result", {}, Visibility.PRIVATE, frozenset({seer.participant_id}))
-    viewer = ViewerContext("human", ViewerKind.DEAD_SPECTATOR)
+    ).append_event(
+        "inspection_result",
+        {"target_id": "ai-1", "is_wolf": True},
+        Visibility.PRIVATE,
+        frozenset({seer.participant_id}),
+    ).append_event(
+        "witch_action_result",
+        {"saved_target_id": "ai-1", "raw_model_response": "never expose"},
+        Visibility.PRIVATE,
+        frozenset({witch.participant_id}),
+    ).append_event(
+        "night_victim",
+        {"target_id": "ai-1"},
+        Visibility.SERVER,
+    )
+    viewer = ViewerContext("human", ViewerKind.DEAD_GLOBAL)
 
+    view = project_state(state, viewer)
     events = project_events(state.events, viewer, state)
 
-    assert all(event["visibility"] == Visibility.PUBLIC.value for event in events)
+    assert all("role_id" in participant for participant in view["participants"].values())
+    assert {event["event_type"] for event in events} >= {"inspection_result", "witch_action_result"}
+    assert all(event["event_type"] != "night_victim" for event in events)
+    witch_result = next(event for event in events if event["event_type"] == "witch_action_result")
+    assert witch_result["payload"] == {"saved_target_id": "ai-1"}
 
 
 def test_finished_report_reveals_roles_without_putting_them_in_live_snapshot() -> None:

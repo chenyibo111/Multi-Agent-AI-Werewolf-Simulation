@@ -13,7 +13,7 @@ class ViewerKind(str, Enum):
     """决定玩家在对局中可见信息的身份状态。"""
 
     ALIVE_HUMAN = "alive_human"
-    DEAD_SPECTATOR = "dead_spectator"
+    DEAD_GLOBAL = "dead_global"
     FINISHED_REPLAY = "finished_replay"
 
 
@@ -37,7 +37,7 @@ def project_state(state: GameState, viewer: ViewerContext) -> dict[str, object]:
         }
         if participant.seat_number is not None:
             item["seat_number"] = participant.seat_number
-        if viewer.kind is ViewerKind.FINISHED_REPLAY or participant.participant_id == viewer.participant_id:
+        if viewer.kind in {ViewerKind.DEAD_GLOBAL, ViewerKind.FINISHED_REPLAY} or participant.participant_id == viewer.participant_id:
             item["role_id"] = participant.role_id
         if participant.participant_id == viewer.participant_id and viewer.kind is ViewerKind.ALIVE_HUMAN:
             item["private_state"] = _safe_payload(participant.private_state)
@@ -84,7 +84,7 @@ def project_finished_report(state: GameState) -> dict[str, object]:
 
 
 def _can_view(event: GameEvent, viewer: ViewerContext) -> bool:
-    if viewer.kind is ViewerKind.FINISHED_REPLAY:
+    if viewer.kind in {ViewerKind.DEAD_GLOBAL, ViewerKind.FINISHED_REPLAY}:
         return event.visibility is not Visibility.SERVER
     if event.visibility is Visibility.PUBLIC:
         return True

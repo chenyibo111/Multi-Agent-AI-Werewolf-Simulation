@@ -139,7 +139,7 @@ class GameEngine:
         if state.phase is Phase.NIGHT_SEER:
             seer = next((item for item in state.participants if item.alive and item.role_id == "seer"), None)
             if seer is None:
-                return self._change_phase(state, Phase.NIGHT_WITCH)
+                return self._notify_witch_of_night_target(self._change_phase(state, Phase.NIGHT_WITCH))
             command = next((item for item in state.pending_commands if item.actor_id == seer.participant_id), None)
             if command is None:
                 return state
@@ -152,7 +152,7 @@ class GameEngine:
                     Visibility.PRIVATE,
                     frozenset({seer.participant_id}),
                 )
-            return self._change_phase(state, Phase.NIGHT_WITCH)
+            return self._notify_witch_of_night_target(self._change_phase(state, Phase.NIGHT_WITCH))
         if state.phase is Phase.NIGHT_WITCH:
             witch = next((item for item in state.participants if item.alive and item.role_id == "witch"), None)
             command = (
@@ -176,7 +176,11 @@ class GameEngine:
                 else None
             )
             updated_private_state = (
-                {**witch.private_state, resource_key: False} if witch is not None and resource_key is not None else {}
+                {**witch.private_state, resource_key: False}
+                if witch is not None and resource_key is not None
+                else dict(witch.private_state)
+                if witch is not None
+                else {}
             )
             participants = tuple(
                 item.model_copy(update={"alive": False})
@@ -187,6 +191,18 @@ class GameEngine:
                 for item in state.participants
             )
             state = state.model_copy(update={"participants": participants, "pending_commands": ()})
+            if witch is not None:
+                state = state.append_event(
+                    "witch_action_result",
+                    {
+                        "saved_target_id": victim if saved else None,
+                        "poisoned_target_id": poisoned,
+                        "antidote_available": bool(updated_private_state.get("antidote_available")),
+                        "poison_available": bool(updated_private_state.get("poison_available")),
+                    },
+                    Visibility.PRIVATE,
+                    frozenset({witch.participant_id}),
+                )
             state = state.append_event(
                 "night_announcement",
                 {"death_count": len(dead_ids), "death_ids": sorted(dead_ids)},
@@ -249,6 +265,19 @@ class GameEngine:
                 target_id = event.payload.get("target_id")
                 return target_id if isinstance(target_id, str) else None
         return None
+
+    @staticmethod
+    def _notify_witch_of_night_target(state: GameState) -> GameState:
+        witch = next((item for item in state.participants if item.alive and item.role_id == "witch"), None)
+        victim = GameEngine._night_victim(state)
+        if witch is None or victim is None:
+            return state
+        return state.append_event(
+            "witch_night_target",
+            {"target_id": victim},
+            Visibility.PRIVATE,
+            frozenset({witch.participant_id}),
+        )
 
     @staticmethod
     def _finish_if_winner(state: GameState) -> GameState:

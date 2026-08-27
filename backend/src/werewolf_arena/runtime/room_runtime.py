@@ -9,7 +9,7 @@ from uuid import UUID
 from werewolf_arena.agents.orchestrator import GameOrchestrator, OrchestrationResult
 from werewolf_arena.domain.engine import GameEngine
 from werewolf_arena.domain.models import GameCommand, GameEvent, GameState
-from werewolf_arena.domain.projection import ViewerContext, project_events
+from werewolf_arena.domain.projection import ViewerContext, ViewerKind, project_events
 from werewolf_arena.persistence.repository import SQLiteRoomRepository
 
 RuntimeEnvelope = dict[str, object]
@@ -104,6 +104,19 @@ class RoomRuntime:
         if not events:
             return
         for queue, viewer in tuple(self._subscribers.items()):
-            projected = project_events(events, viewer, state)
+            participant = next(
+                (item for item in state.participants if item.participant_id == viewer.participant_id), None
+            )
+            if participant is None:
+                continue
+            current_viewer = (
+                ViewerContext(
+                    viewer.participant_id,
+                    ViewerKind.ALIVE_HUMAN if participant.alive else ViewerKind.DEAD_GLOBAL,
+                )
+                if viewer.kind is not ViewerKind.FINISHED_REPLAY
+                else viewer
+            )
+            projected = project_events(events, current_viewer, state)
             if projected:
                 queue.put_nowait({"type": "events", "events": projected})

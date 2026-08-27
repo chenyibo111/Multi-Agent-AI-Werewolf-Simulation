@@ -84,8 +84,8 @@ def test_running_room_rejects_finished_report_request(tmp_path) -> None:
     assert response.status_code == 409
 
 
-def test_dead_human_room_view_is_public_spectating_without_actions() -> None:
-    """Death revokes private room controls even if the runtime still has a wait status."""
+def test_dead_human_room_view_is_global_but_without_actions() -> None:
+    """Death enables replay knowledge but never restores command authority."""
     engine = GameEngine(standard_role_registry(), standard_six_player_mode(), seed=7)
     state = engine.create_game("human", requested_role_id="seer")
     dead_state = state.model_copy(
@@ -101,7 +101,7 @@ def test_dead_human_room_view_is_public_spectating_without_actions() -> None:
 
     view = _state_view(
         dead_state,
-        ViewerContext("human", ViewerKind.DEAD_SPECTATOR),
+        ViewerContext("human", ViewerKind.ALIVE_HUMAN),
         waiting_for_human=True,
         human_actions=(CommandKind.INSPECT,),
     )
@@ -110,7 +110,7 @@ def test_dead_human_room_view_is_public_spectating_without_actions() -> None:
     assert view["waiting_for_human"] is False
     assert view["human_actions"] == []
     assert view["legal_target_ids"] == []
-    assert "private_state" not in view["participants"]["human"]
+    assert all("role_id" in participant for participant in view["participants"].values())
 
 
 def test_active_wolf_view_exposes_only_living_teammate_public_identity() -> None:
@@ -137,7 +137,7 @@ def test_active_wolf_view_exposes_only_living_teammate_public_identity() -> None
                 )
             }
         ),
-        ViewerContext("human", ViewerKind.DEAD_SPECTATOR),
+        ViewerContext("human", ViewerKind.DEAD_GLOBAL),
         waiting_for_human=False,
         human_actions=(),
     )
