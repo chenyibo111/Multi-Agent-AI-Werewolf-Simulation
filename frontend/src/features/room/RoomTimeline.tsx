@@ -17,6 +17,8 @@ function eventText(event: RoomEvent, participants: Record<string, ProjectedParti
     ].filter(Boolean).join("；") || "未使用药剂";
     return `女巫行动：${actions}；解药${payload.antidote_available ? "可用" : "已用"}，毒药${payload.poison_available ? "可用" : "已用"}。`;
   }
+  if (event.event_type === "agent_public_reason" && isPublicReason(payload)) return `${displayName(payload.actor_id, participants)}的${publicReasonLabel(payload.action_kind)}理由：${payload.reason}`;
+  if (event.event_type === "agent_private_reason" && isPrivateReason(payload)) return `${displayName(payload.actor_id, participants)}的夜间${nightActionLabel(payload.action_kind)}理由：${payload.reason}`;
   if (event.event_type === "public_speech" && typeof payload.actor_id === "string" && typeof payload.text === "string") return `${displayName(payload.actor_id, participants)}：${payload.text}`;
   if (event.event_type === "night_announcement" && Array.isArray(payload.death_ids) && payload.death_ids.every((id) => typeof id === "string")) return payload.death_ids.length ? `天亮了，昨夜 ${payload.death_ids.map((id) => displayName(id, participants)).join("、")} 出局。` : "平安夜，昨夜无人出局。";
   if (event.event_type === "vote_result" && Array.isArray(payload.votes)) {
@@ -55,4 +57,42 @@ function isWitchActionResult(value: Record<string, unknown>): value is {
     && (typeof value.poisoned_target_id === "string" || value.poisoned_target_id === null)
     && typeof value.antidote_available === "boolean"
     && typeof value.poison_available === "boolean";
+}
+
+function isPublicReason(value: Record<string, unknown>): value is {
+  actor_id: string;
+  action_kind: "speak" | "vote" | "abstain";
+  reason: string;
+} {
+  return typeof value.actor_id === "string"
+    && typeof value.reason === "string"
+    && (value.action_kind === "speak" || value.action_kind === "vote" || value.action_kind === "abstain");
+}
+
+function isPrivateReason(value: Record<string, unknown>): value is {
+  actor_id: string;
+  action_kind: "wolf_kill" | "inspect" | "witch_save" | "witch_poison";
+  target_id: string;
+  reason: string;
+} {
+  return typeof value.actor_id === "string"
+    && typeof value.target_id === "string"
+    && typeof value.reason === "string"
+    && (value.action_kind === "wolf_kill"
+      || value.action_kind === "inspect"
+      || value.action_kind === "witch_save"
+      || value.action_kind === "witch_poison");
+}
+
+function publicReasonLabel(actionKind: "speak" | "vote" | "abstain"): string {
+  return { speak: "发言", vote: "投票", abstain: "弃权" }[actionKind];
+}
+
+function nightActionLabel(actionKind: "wolf_kill" | "inspect" | "witch_save" | "witch_poison"): string {
+  return {
+    wolf_kill: "狼人击杀",
+    inspect: "预言家查验",
+    witch_save: "女巫救人",
+    witch_poison: "女巫用毒",
+  }[actionKind];
 }

@@ -203,6 +203,43 @@ describe("RoomTimeline", () => {
     expect(screen.getByText("狼人同伴 林小雨 建议击杀 周子墨：今晚先从周子墨开始。")) .toBeVisible();
   });
 
+  it("renders a validated public AI vote reason with the player's display name", () => {
+    render(
+      <RoomTimeline
+        participants={{ "ai-1": { participant_id: "ai-1", display_name: "林小雨", alive: true } }}
+        events={[{
+          sequence: 6,
+          event_type: "agent_public_reason",
+          payload: { actor_id: "ai-1", action_kind: "vote", reason: "票型最可疑。", secret: "never render" },
+          visibility: "public",
+        }]}
+      />,
+    );
+
+    expect(screen.getByText("林小雨的投票理由：票型最可疑。")) .toBeVisible();
+    expect(document.body.textContent).not.toContain("never render");
+  });
+
+  it("renders a validated private AI night-action reason without serializing its payload", () => {
+    render(
+      <RoomTimeline
+        participants={{
+          "ai-1": { participant_id: "ai-1", display_name: "林小雨", alive: true },
+          "ai-2": { participant_id: "ai-2", display_name: "周子墨", alive: true },
+        }}
+        events={[{
+          sequence: 7,
+          event_type: "agent_private_reason",
+          payload: { actor_id: "ai-1", action_kind: "wolf_kill", target_id: "ai-2", reason: "优先排除最可疑的目标。", raw_prompt: "never render" },
+          visibility: "private",
+        }]}
+      />,
+    );
+
+    expect(screen.getByText("林小雨的夜间狼人击杀理由：优先排除最可疑的目标。")) .toBeVisible();
+    expect(document.body.textContent).not.toContain("never render");
+  });
+
   it("renders unknown events as a safe generic line instead of serializing payload fields", () => {
     render(
       <RoomTimeline
@@ -228,6 +265,12 @@ describe("PrivatePanel", () => {
     render(<PrivatePanel state={waitingSeerState} />);
 
     expect(screen.getByText("预言家")).toBeVisible();
+  });
+
+  it("shows the server-supplied current phase as explicit feedback", () => {
+    render(<PrivatePanel state={waitingSeerState} />);
+
+    expect(screen.getByText("当前阶段：预言家查验")).toBeVisible();
   });
 
   it("shows an active wolf their living teammate", () => {

@@ -109,8 +109,12 @@ class GameOrchestrator:
         )
         if submitted_kill is not None:
             target_id = submitted_kill.target_id
+            coordinator = None
+            decision = None
         elif submitted_commands:
             target_id = None
+            coordinator = None
+            decision = None
         else:
             coordinator = actors[0]
             decision, state = await self._decision(state, coordinator, agent_runs)
@@ -119,13 +123,18 @@ class GameOrchestrator:
             if self._has_submitted_command(state, actor.participant_id):
                 continue
             if target_id is None:
-                state = self._engine.submit(
-                    state, GameCommand(actor_id=actor.participant_id, kind=CommandKind.NOOP)
+                state = self._submit_with_reason(
+                    state,
+                    actor,
+                    GameCommand(actor_id=actor.participant_id, kind=CommandKind.NOOP),
+                    decision if actor is coordinator else None,
                 )
                 continue
-            state = self._engine.submit(
+            state = self._submit_with_reason(
                 state,
+                actor,
                 GameCommand(actor_id=actor.participant_id, kind=CommandKind.WOLF_KILL, target_id=target_id),
+                decision if actor is coordinator else None,
             )
         return state
 
@@ -184,7 +193,7 @@ class GameOrchestrator:
             decision, state = await self._decision(state, actor, agent_runs)
             if state.phase is Phase.DAY_VOTE and decision.kind not in {CommandKind.VOTE, CommandKind.ABSTAIN}:
                 decision = AgentDecision(kind=CommandKind.ABSTAIN, failure_kind=decision.failure_kind)
-            state = self._engine.submit(state, decision.to_command(actor.participant_id))
+            state = self._submit_with_reason(state, actor, decision.to_command(actor.participant_id), decision)
         return state
 
     async def _run_discussion(
@@ -200,9 +209,11 @@ class GameOrchestrator:
                 continue
             decision, state = await self._decision(state, actor, agent_runs)
             text = decision.speech or "我暂时没有更多信息。"
-            state = self._engine.submit(
+            state = self._submit_with_reason(
                 state,
+                actor,
                 GameCommand(actor_id=actor.participant_id, kind=CommandKind.SPEAK, text=text),
+                decision,
             )
         human = self._human(state)
         return state, human.alive
@@ -273,6 +284,59 @@ class GameOrchestrator:
             cost_usd=usage.cost_usd + decision.cost_usd,
         )
         return decision, self._remember(state, actor, decision, updated_usage)
+
+    def _submit_with_reason(
+        self,
+        state: GameState,
+        actor: Participant,
+        command: GameCommand,
+        decision: AgentDecision | None,
+    ) -> GameState:
+        """Persist a safe reason only after the engine accepts the corresponding AI command."""
+        accepted_state = self._engine.submit(state, command)
+        if decision is None or decision.kind is not command.kind or not self._command_was_accepted(accepted_state, command):
+            return accepted_state
+        return self._record_reason(accepted_state, actor, decision)
+
+    @staticmethod
+    def _command_was_accepted(state: GameState, command: GameCommand) -> bool:
+        if command.kind is CommandKind.SPEAK:
+            return bool(state.events) and state.events[-1].event_type == "public_speech"
+        return command in state.pending_commands
+
+    @staticmethod
+    def _record_reason(state: GameState, actor: Participant, decision: AgentDecision) -> GameState:
+        reason = decision.public_reason.strip()
+        if not reason or decision.failure_kind is not None:
+            return state
+        if decision.kind in {CommandKind.SPEAK, CommandKind.VOTE, CommandKind.ABSTAIN}:
+            return state.append_event(
+                "agent_public_reason",
+                {
+                    "actor_id": actor.participant_id,
+                    "action_kind": decision.kind.value,
+                    "reason": reason,
+                },
+                Visibility.PUBLIC,
+            )
+        if decision.kind in {
+            CommandKind.WOLF_KILL,
+            CommandKind.INSPECT,
+            CommandKind.WITCH_SAVE,
+            CommandKind.WITCH_POISON,
+        }:
+            return state.append_event(
+                "agent_private_reason",
+                {
+                    "actor_id": actor.participant_id,
+                    "action_kind": decision.kind.value,
+                    "target_id": decision.target_id,
+                    "reason": reason,
+                },
+                Visibility.PRIVATE,
+                frozenset({actor.participant_id}),
+            )
+        return state
 
     @staticmethod
     def _remember(
