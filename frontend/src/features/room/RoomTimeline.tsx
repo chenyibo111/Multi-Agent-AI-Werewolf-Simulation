@@ -1,4 +1,5 @@
 import type { ProjectedParticipant, RoomEvent } from "../../lib/types";
+import { phaseLabel } from "../../lib/game-labels";
 
 export function RoomTimeline({ events, participants = {} }: { events: RoomEvent[]; participants?: Record<string, ProjectedParticipant> }) {
   return <section className="timeline" aria-label="公开对局时间线"><h2>对局叙事</h2>{events.length === 0 ? <p>等待第一条公开事件。</p> : events.map((event) => <article className="timeline-event" key={event.sequence}><span>#{event.sequence}</span><p>{eventText(event, participants)}</p></article>)}</section>;
@@ -6,7 +7,7 @@ export function RoomTimeline({ events, participants = {} }: { events: RoomEvent[
 
 function eventText(event: RoomEvent, participants: Record<string, ProjectedParticipant>): string {
   const payload = event.payload;
-  if (event.event_type === "phase_changed" && typeof payload.phase === "string") return `阶段切换：${payload.phase}`;
+  if (event.event_type === "phase_changed" && typeof payload.phase === "string") return `阶段切换：${phaseLabel(payload.phase)}`;
   if (event.event_type === "inspection_result" && typeof payload.target_id === "string" && typeof payload.is_wolf === "boolean") return `查验结果：${displayName(payload.target_id, participants)} ${payload.is_wolf ? "是狼人" : "不是狼人"}。`;
   if (event.event_type === "witch_night_target" && typeof payload.target_id === "string") return `女巫得知：今晚被袭击的是${displayName(payload.target_id, participants)}。`;
   if (event.event_type === "witch_action_result" && isWitchActionResult(payload)) {

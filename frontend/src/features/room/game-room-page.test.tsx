@@ -63,6 +63,16 @@ describe("ActionPanel", () => {
 });
 
 describe("RoomTimeline", () => {
+  it("renders internal phase changes as Chinese stage names", () => {
+    render(
+      <RoomTimeline
+        events={[{ sequence: 2, event_type: "phase_changed", payload: { phase: "night_seer" }, visibility: "public" }]}
+      />,
+    );
+
+    expect(screen.getByText("阶段切换：预言家查验阶段")).toBeVisible();
+  });
+
   it("renders a private seer inspection result without exposing unrelated payload fields", () => {
     render(
       <RoomTimeline
