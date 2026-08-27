@@ -96,6 +96,47 @@ describe("RoomTimeline", () => {
     expect(screen.getByText("天亮了，昨夜 ai-1、ai-2 出局。")) .toBeVisible();
   });
 
+  it("renders the public vote breakdown with display names and abstentions", () => {
+    render(
+      <RoomTimeline
+        participants={{
+          "ai-1": { participant_id: "ai-1", display_name: "林小雨", alive: true },
+          "ai-2": { participant_id: "ai-2", display_name: "周子墨", alive: true },
+          "ai-3": { participant_id: "ai-3", display_name: "陈星河", alive: true },
+        }}
+        events={[
+          {
+            sequence: 3,
+            event_type: "vote_result",
+            payload: { votes: [{ actor_id: "ai-1", target_id: "ai-2" }, { actor_id: "ai-3", target_id: null }] },
+            visibility: "public",
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("投票结果：林小雨 → 周子墨；陈星河 → 弃权。")) .toBeVisible();
+  });
+
+  it("falls back to an unknown vote target ID without rendering extra payload fields", () => {
+    render(
+      <RoomTimeline
+        participants={{ "ai-1": { participant_id: "ai-1", display_name: "林小雨", alive: true } }}
+        events={[
+          {
+            sequence: 4,
+            event_type: "vote_result",
+            payload: { votes: [{ actor_id: "ai-1", target_id: "missing-id", secret: "never render" }] },
+            visibility: "public",
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("投票结果：林小雨 → missing-id。")) .toBeVisible();
+    expect(document.body.textContent).not.toContain("never render");
+  });
+
   it("renders unknown events as a safe generic line instead of serializing payload fields", () => {
     render(
       <RoomTimeline

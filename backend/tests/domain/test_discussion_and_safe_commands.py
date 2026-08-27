@@ -68,6 +68,40 @@ def test_all_abstentions_resolve_without_executing_an_empty_target() -> None:
     assert state.pending_commands == ()
     assert state.events[-2].event_type == "vote_no_execution"
     assert state.events[-1].event_type == "phase_changed"
+    vote_result = next(event for event in state.events if event.event_type == "vote_result")
+    assert vote_result.payload == {
+        "votes": [{"actor_id": participant.participant_id, "target_id": None} for participant in state.participants]
+    }
+
+
+def test_vote_result_publicly_records_each_vote_and_abstention() -> None:
+    """Day-vote resolution retains the complete public ballot before clearing commands."""
+    engine = _engine()
+    state = engine.create_game("human", requested_role_id="villager").model_copy(
+        update={"phase": Phase.DAY_VOTE}
+    )
+    voters = iter(state.participants)
+    first = next(voters)
+    second = next(voters)
+    state = engine.submit(state, GameCommand(actor_id=first.participant_id, kind=CommandKind.VOTE, target_id=second.participant_id))
+    state = engine.submit(
+        state,
+        GameCommand(actor_id=second.participant_id, kind=CommandKind.ABSTAIN, target_id=first.participant_id),
+    )
+    for participant in voters:
+        state = engine.submit(state, GameCommand(actor_id=participant.participant_id, kind=CommandKind.ABSTAIN))
+
+    state = engine.advance_automatic(state)
+
+    result = next(event for event in state.events if event.event_type == "vote_result")
+    assert result.visibility is Visibility.PUBLIC
+    assert result.payload == {
+        "votes": [
+            {"actor_id": first.participant_id, "target_id": second.participant_id},
+            {"actor_id": second.participant_id, "target_id": None},
+            *({"actor_id": participant.participant_id, "target_id": None} for participant in tuple(state.participants)[2:]),
+        ]
+    }
 
 
 def test_noop_completes_a_night_ability_turn_without_a_target() -> None:

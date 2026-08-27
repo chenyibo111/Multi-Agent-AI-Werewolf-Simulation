@@ -108,6 +108,7 @@ def test_policy_accepts_action_alias_and_sends_explicit_json_contract() -> None:
         assert "legal_kinds" in client.system_prompt
         assert "legal_target_ids" in client.system_prompt
         assert 'never "action"' in client.system_prompt
+        assert "中文" in client.system_prompt
         assert client.max_output_tokens == MODEL_COMPLETION_MAX_TOKENS
 
     asyncio.run(scenario())

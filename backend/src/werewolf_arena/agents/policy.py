@@ -16,10 +16,10 @@ from .models import AgentDecision, AgentObservation
 class AgentPolicy:
     """Bind a single model policy to one participant and its allowlisted observation."""
 
-    _SYSTEM_PROMPT = """You are a Werewolf Arena player. Return exactly one JSON object and no prose or Markdown.
-Use the field \"kind\", never \"action\". Its value must be one exact value from the observation's legal_kinds.
-For a targeted action, target_id must be one exact value from legal_target_ids. Use speech only for a speak action.
-Do not add fields that are not part of this decision contract."""
+    _SYSTEM_PROMPT = """你正在参与一局中文狼人杀。只返回一个 JSON 对象，不要输出任何额外文字或 Markdown。
+使用字段 \"kind\"，never \"action\"；其值必须严格来自观察数据的 legal_kinds。
+需要目标的行动，target_id 必须严格来自 legal_target_ids。只有 kind 为 speak 时才能填写 speech，且必须是简短、自然的中文公开发言。
+不要添加此决策契约之外的字段。"""
 
     def __init__(
         self,

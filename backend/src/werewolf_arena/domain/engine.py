@@ -10,6 +10,13 @@ from .enums import CommandKind, Faction, GameStatus, Phase, Visibility
 from .mode import GameMode
 from .models import GameCommand, GameState, Participant
 
+_AI_DISPLAY_NAMES = ("林小雨", "周子墨", "陈星河", "苏晚", "顾言")
+
+
+def _ai_display_name(index: int) -> str:
+    """Return a stable friendly label even for custom modes with extra seats."""
+    return _AI_DISPLAY_NAMES[index] if index < len(_AI_DISPLAY_NAMES) else f"新朋友{index + 1}"
+
 
 class GameEngine:
     """验证角色、创建确定性阵容，并接收后续阶段命令。"""
@@ -38,8 +45,8 @@ class GameEngine:
 
         participants = [self._participant(human_participant_id, "你", human_role, is_human=True)]
         participants.extend(
-            self._participant(f"ai-{index}", f"AI 玩家 {index}", role_id)
-            for index, role_id in enumerate(role_slots, start=1)
+            self._participant(f"ai-{index + 1}", _ai_display_name(index), role_id)
+            for index, role_id in enumerate(role_slots)
         )
         state = GameState.empty().model_copy(update={"participants": tuple(participants), "phase": Phase.NIGHT_WOLF})
         state = state.append_event("game_created", {}, Visibility.SERVER)
@@ -192,6 +199,19 @@ class GameEngine:
             commands = [item for item in state.pending_commands if item.kind in {CommandKind.VOTE, CommandKind.ABSTAIN}]
             if {item.actor_id for item in commands} != {item.participant_id for item in alive}:
                 return state
+            state = state.append_event(
+                "vote_result",
+                {
+                    "votes": [
+                        {
+                            "actor_id": command.actor_id,
+                            "target_id": command.target_id if command.kind is CommandKind.VOTE else None,
+                        }
+                        for command in commands
+                    ]
+                },
+                Visibility.PUBLIC,
+            )
             counts: dict[str, int] = {}
             for command in commands:
                 if command.kind is CommandKind.VOTE and command.target_id is not None:
