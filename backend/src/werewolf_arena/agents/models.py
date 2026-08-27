@@ -52,7 +52,7 @@ class AgentDecision(BaseModel):
     kind: CommandKind
     target_id: str | None = None
     speech: str = ""
-    public_reason: str = ""
+    public_reason: str = Field(default="", max_length=300)
     team_message: str = ""
     failure_kind: str | None = None
     input_tokens: int = 0

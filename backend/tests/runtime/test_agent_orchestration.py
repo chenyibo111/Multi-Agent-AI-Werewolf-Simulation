@@ -12,6 +12,7 @@ from werewolf_arena.domain.engine import GameEngine
 from werewolf_arena.domain.enums import CommandKind, Phase, Visibility
 from werewolf_arena.domain.mode import standard_six_player_mode
 from werewolf_arena.domain.models import GameCommand
+from werewolf_arena.domain.projection import ViewerContext, ViewerKind, project_events
 from werewolf_arena.persistence.repository import SQLiteRoomRepository
 from werewolf_arena.roles.standard import standard_role_registry
 from werewolf_arena.runtime.room_runtime import RoomRuntime
@@ -153,6 +154,90 @@ def test_submitted_human_vote_starts_ai_votes_without_a_duplicate_command() -> N
             participant.participant_id for participant in state.participants
         }
         assert not any(event.event_type == "command_rejected" for event in advanced.events)
+
+    asyncio.run(scenario())
+
+
+def test_ai_vote_reason_is_public_after_the_vote_is_accepted() -> None:
+    """A safe AI vote reason is visible to another live player as a public event."""
+
+    class VotingPolicy:
+        async def decide(self, observation):
+            return AgentDecision(
+                kind=CommandKind.VOTE,
+                target_id=observation.legal_target_ids[0],
+                public_reason="票型和发言前后矛盾。",
+            )
+
+    async def scenario() -> None:
+        engine = GameEngine(standard_role_registry(), standard_six_player_mode(), seed=7)
+        state = engine.create_game("human", requested_role_id="villager").model_copy(
+            update={"phase": Phase.DAY_VOTE}
+        )
+        policies = {
+            participant.participant_id: VotingPolicy()
+            for participant in state.participants
+            if not participant.is_human
+        }
+        orchestrator = GameOrchestrator(engine, policies)
+
+        advanced = await orchestrator._run_individual_phase(
+            state, orchestrator._actors_for_phase(state), []
+        )
+        reasons = [event for event in advanced.events if event.event_type == "agent_public_reason"]
+        viewer_events = project_events(
+            advanced.events,
+            ViewerContext("human", ViewerKind.ALIVE_HUMAN),
+            advanced,
+        )
+
+        assert len(reasons) == len(policies)
+        assert reasons[0].visibility is Visibility.PUBLIC
+        assert reasons[0].payload["action_kind"] == CommandKind.VOTE.value
+        assert reasons[0].payload["reason"] == "票型和发言前后矛盾。"
+        assert any(event["event_type"] == "agent_public_reason" for event in viewer_events)
+
+    asyncio.run(scenario())
+
+
+def test_ai_night_reason_is_private_to_the_acting_player() -> None:
+    """A live non-recipient cannot project a wolf's night-action reason."""
+
+    class WolfPolicy:
+        async def decide(self, observation):
+            return AgentDecision(
+                kind=CommandKind.WOLF_KILL,
+                target_id=observation.legal_target_ids[0],
+                public_reason="优先处理发言最少的目标。",
+            )
+
+    async def scenario() -> None:
+        engine = GameEngine(standard_role_registry(), standard_six_player_mode(), seed=7)
+        state = engine.create_game("human", requested_role_id="seer")
+        wolves = [participant for participant in state.participants if participant.role_id == "wolf"]
+        orchestrator = GameOrchestrator(engine, {wolf.participant_id: WolfPolicy() for wolf in wolves})
+
+        advanced = await orchestrator._run_wolf_team(state, tuple(wolves), [])
+        reason = next(event for event in advanced.events if event.event_type == "agent_private_reason")
+        actor_events = project_events(
+            advanced.events,
+            ViewerContext(wolves[0].participant_id, ViewerKind.ALIVE_HUMAN),
+            advanced,
+        )
+        unrelated_events = project_events(
+            advanced.events,
+            ViewerContext("human", ViewerKind.ALIVE_HUMAN),
+            advanced,
+        )
+
+        assert reason.visibility is Visibility.PRIVATE
+        assert reason.recipient_ids == frozenset({wolves[0].participant_id})
+        assert reason.payload["action_kind"] == CommandKind.WOLF_KILL.value
+        assert reason.payload["target_id"] in {
+            participant.participant_id for participant in state.participants if participant.role_id != "wolf"
+        }
+        assert any(event["event_type"] == "agent_private_reason" for event in actor_events)
+        assert all(event["event_type"] != "agent_private_reason" for event in unrelated_events)
 
     asyncio.run(scenario())
 

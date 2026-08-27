@@ -8,7 +8,16 @@ from werewolf_arena.domain.models import GameEvent, GameState, Participant
 from .models import AgentMemory, AgentObservation, PublicPlayer
 
 _PUBLIC_REASONING_EVENT_TYPES = frozenset(
-    {"public_speech", "night_announcement", "vote_result", "execution", "vote_tied", "vote_no_execution", "game_finished"}
+    {
+        "agent_public_reason",
+        "public_speech",
+        "night_announcement",
+        "vote_result",
+        "execution",
+        "vote_tied",
+        "vote_no_execution",
+        "game_finished",
+    }
 )
 
 

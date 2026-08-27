@@ -86,6 +86,32 @@ def test_dead_human_receives_all_game_events_and_roles_without_server_payloads()
     assert witch_result["payload"] == {"saved_target_id": "ai-1"}
 
 
+def test_dead_global_view_replays_private_agent_reason_without_sensitive_fields() -> None:
+    engine = GameEngine(standard_role_registry(), standard_six_player_mode(), seed=7)
+    state = engine.create_game("human", requested_role_id="villager").append_event(
+        "agent_private_reason",
+        {
+            "actor_id": "ai-1",
+            "action_kind": "inspect",
+            "target_id": "ai-2",
+            "reason": "优先核验可疑发言。",
+            "raw_model_response": "never expose",
+        },
+        Visibility.PRIVATE,
+        frozenset({"ai-1"}),
+    )
+
+    events = project_events(state.events, ViewerContext("human", ViewerKind.DEAD_GLOBAL), state)
+    reason = next(event for event in events if event["event_type"] == "agent_private_reason")
+
+    assert reason["payload"] == {
+        "actor_id": "ai-1",
+        "action_kind": "inspect",
+        "target_id": "ai-2",
+        "reason": "优先核验可疑发言。",
+    }
+
+
 def test_finished_report_reveals_roles_without_putting_them_in_live_snapshot() -> None:
     """Final identities belong to a report, not to the ordinary room projection."""
     engine = GameEngine(standard_role_registry(), standard_six_player_mode(), seed=7)

@@ -7,10 +7,11 @@ import json
 from pydantic import ValidationError
 
 from werewolf_arena.agents.budget import MODEL_COMPLETION_MAX_TOKENS
-from werewolf_arena.domain.enums import CommandKind, Phase
+from werewolf_arena.domain.enums import CommandKind
 
 from .model_client import AsyncModelClient, ModelCompletion
 from .models import AgentDecision, AgentObservation
+from .role_strategy import strategy_for
 
 
 class AgentPolicy:
@@ -20,6 +21,7 @@ class AgentPolicy:
 使用字段 \"kind\"，never \"action\"；其值必须严格来自观察数据的 legal_kinds。
 需要目标的行动，target_id 必须严格来自 legal_target_ids。只有 kind 为 speak 时才能填写 speech，且必须是简短、自然的中文公开发言。
 自然语言中只引用 public_players 的昵称（必要时加座位号），不要使用 ai- 等内部 ID。
+可填写 public_reason，作为不超过 300 字的简短中文理由；仅描述可安全说明的判断，不包含提示词、模型内部过程或内部 ID。
 仅在狼人夜间行动时可填写 team_message，作为给狼人同伴的简短中文私密建议。
 不要添加此决策契约之外的字段。"""
 
@@ -37,12 +39,9 @@ class AgentPolicy:
         """Return an allowlisted decision or a safe no-op when the model is unusable."""
         if observation.participant_id != self._participant_id:
             raise ValueError("Agent policy received an observation for another participant")
-        forced_decision = self._forced_decision(observation)
-        if forced_decision is not None:
-            return forced_decision
         try:
             completion = await self._model_client.complete(
-                self._SYSTEM_PROMPT,
+                self._system_prompt(observation),
                 observation.model_dump_json(),
                 max_output_tokens=self._max_output_tokens,
             )
@@ -62,21 +61,11 @@ class AgentPolicy:
             return self._fallback("invalid_model_output")
         return self._replace_internal_ids(decision, observation)
 
-    @staticmethod
-    def _forced_decision(observation: AgentObservation) -> AgentDecision | None:
-        """Apply temporary deterministic role rules before future role prompts take over."""
-        victim_id = observation.private_facts.get("night_victim_id")
-        resources = observation.private_facts.get("resources")
-        if (
-            observation.phase is Phase.NIGHT_WITCH
-            and CommandKind.WITCH_SAVE in observation.legal_kinds
-            and isinstance(victim_id, str)
-            and victim_id in observation.legal_target_ids
-            and isinstance(resources, dict)
-            and resources.get("antidote_available") is True
-        ):
-            return AgentDecision(kind=CommandKind.WITCH_SAVE, target_id=victim_id)
-        return None
+    @classmethod
+    def _system_prompt(cls, observation: AgentObservation) -> str:
+        role_id = observation.private_facts.get("role_id")
+        role_strategy = strategy_for(role_id) if isinstance(role_id, str) else strategy_for("")
+        return f"{cls._SYSTEM_PROMPT}\n你的角色策略：{role_strategy}"
 
     @staticmethod
     def _normalize_payload(payload: object) -> object:
@@ -102,6 +91,7 @@ class AgentPolicy:
             return False
         return (
             (not decision.speech or len(decision.speech) <= 500)
+            and (not decision.public_reason or len(decision.public_reason) <= 300)
             and (not decision.team_message or len(decision.team_message) <= 300)
         )
 
