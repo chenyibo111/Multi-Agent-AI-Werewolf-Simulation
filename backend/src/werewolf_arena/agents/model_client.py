@@ -49,16 +49,19 @@ class OpenAICompatibleClient:
     ) -> ModelCompletion:
         """Request a JSON object and normalize provider-specific response shapes."""
         started_at = perf_counter()
-        response = await self._sdk_client.chat.completions.create(
-            model=self._settings.model,
-            messages=[
+        request: dict[str, Any] = {
+            "model": self._settings.model,
+            "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            temperature=0.4,
-            max_tokens=max_output_tokens,
-            response_format={"type": "json_object"},
-        )
+            "temperature": 0.4,
+            "max_tokens": max_output_tokens,
+            "response_format": {"type": "json_object"},
+        }
+        if not self._settings.thinking_enabled:
+            request["extra_body"] = {"thinking": {"type": "disabled"}}
+        response = await self._sdk_client.chat.completions.create(**request)
         choices = getattr(response, "choices", ())
         if not choices:
             raise RuntimeError("Model response contained no choices")

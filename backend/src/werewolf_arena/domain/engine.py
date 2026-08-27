@@ -175,8 +175,18 @@ class GameEngine:
                 for item in state.participants
             )
             state = state.model_copy(update={"participants": participants, "pending_commands": ()})
-            state = state.append_event("night_announcement", {"death_count": len(dead_ids)}, Visibility.PUBLIC)
+            state = state.append_event(
+                "night_announcement",
+                {"death_count": len(dead_ids), "death_ids": sorted(dead_ids)},
+                Visibility.PUBLIC,
+            )
             return self._finish_if_winner(self._change_phase(state, Phase.DAY_DISCUSSION))
+        if state.phase is Phase.DAY_DISCUSSION:
+            if not any(participant.is_human and participant.alive for participant in state.participants):
+                return self._change_phase(state, Phase.DAY_VOTE).append_event(
+                    "discussion_ended", {"actor_id": "system"}, Visibility.PUBLIC
+                )
+            return state
         if state.phase is Phase.DAY_VOTE:
             alive = [item for item in state.participants if item.alive]
             commands = [item for item in state.pending_commands if item.kind in {CommandKind.VOTE, CommandKind.ABSTAIN}]
@@ -187,7 +197,9 @@ class GameEngine:
                 if command.kind is CommandKind.VOTE and command.target_id is not None:
                     counts[command.target_id] = counts.get(command.target_id, 0) + 1
             if not counts:
-                state = state.append_event("vote_no_execution", {}, Visibility.PUBLIC)
+                state = state.model_copy(update={"pending_commands": ()}).append_event(
+                    "vote_no_execution", {}, Visibility.PUBLIC
+                )
                 return self._finish_if_winner(self._change_phase(state, Phase.NIGHT_WOLF))
             highest = max(counts.values())
             winning_targets = [target for target, count in counts.items() if count == highest]

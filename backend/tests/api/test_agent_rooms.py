@@ -67,3 +67,15 @@ def test_room_snapshot_preserves_the_current_human_wait_status(tmp_path) -> None
 
     assert loaded.status_code == 200
     assert loaded.json()["state"]["waiting_for_human"] is True
+
+
+def test_witch_room_exposes_only_the_fixed_antidote_target(tmp_path) -> None:
+    """A human witch receives the server-selected rescue target but may still choose poison targets."""
+    app = create_app(database_path=tmp_path / "werewolf.db", model_client=ScriptedRoomClient())
+    with TestClient(app) as client:
+        response = client.post("/api/rooms", json={"requested_role_id": "witch"})
+
+    assert response.status_code == 201
+    state = response.json()["state"]
+    assert state["phase"] == "night_witch"
+    assert state["fixed_target_ids"] == {"witch_save": "ai-1"}

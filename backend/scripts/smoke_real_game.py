@@ -34,7 +34,11 @@ async def _run(requested_role: str, max_agent_calls: int) -> dict[str, object]:
     state = engine.create_game("human", requested_role)
     client = OpenAICompatibleClient(settings)
     policies = {
-        participant.participant_id: AgentPolicy(participant.participant_id, client)
+        participant.participant_id: AgentPolicy(
+            participant.participant_id,
+            client,
+            max_output_tokens=settings.max_output_tokens,
+        )
         for participant in state.participants
         if not participant.is_human
     }
@@ -42,6 +46,7 @@ async def _run(requested_role: str, max_agent_calls: int) -> dict[str, object]:
         engine,
         policies,
         budget=AgentBudget(max_model_calls=max_agent_calls),
+        max_output_tokens=settings.max_output_tokens,
     )
     with TemporaryDirectory(prefix="werewolf-arena-smoke-") as directory:
         repository = SQLiteRoomRepository(Path(directory) / "smoke.db")

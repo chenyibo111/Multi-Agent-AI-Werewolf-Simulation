@@ -77,7 +77,7 @@ def test_running_room_rejects_finished_report_request(tmp_path) -> None:
     """The report route cannot turn an in-progress room into an identity leak."""
     app = create_app(database_path=tmp_path / "werewolf.db")
     with TestClient(app) as client:
-        created = client.post("/api/rooms", json={"requested_role_id": "villager"}).json()
+        created = client.post("/api/rooms", json={"requested_role_id": "wolf"}).json()
         response = client.get(f"/api/rooms/{created['room_id']}/report")
 
     assert response.status_code == 409

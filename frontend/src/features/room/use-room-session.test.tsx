@@ -59,4 +59,28 @@ describe("useRoomSession", () => {
 
     act(unmount);
   });
+
+  it("resumes a running room that has no available human action after a restart", async () => {
+    vi.stubGlobal("WebSocket", MockWebSocket);
+    const stalled: RoomPayload = {
+      ...payload,
+      state: { ...payload.state, phase: "day_discussion", waiting_for_human: false, human_actions: [], view_mode: "spectating" },
+    };
+    const resumed: RoomPayload = {
+      ...stalled,
+      state: { ...stalled.state, phase: "day_vote" },
+    };
+    const api = {
+      getRoom: vi.fn().mockResolvedValue(stalled),
+      continueRoom: vi.fn().mockResolvedValue(resumed),
+      submitCommand: vi.fn(),
+    } as unknown as ApiClient;
+
+    const { result, unmount } = renderHook(() => useRoomSession("room-1", api));
+
+    await waitFor(() => expect(api.continueRoom).toHaveBeenCalledWith("room-1"));
+    expect(result.current.snapshot?.phase).toBe("day_vote");
+
+    act(unmount);
+  });
 });

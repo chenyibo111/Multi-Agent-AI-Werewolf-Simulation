@@ -32,6 +32,7 @@ export type RoomSnapshot = {
   waiting_for_human: boolean;
   human_actions: HumanAction[];
   legal_target_ids: string[];
+  fixed_target_ids?: Partial<Record<HumanAction, string>>;
   phase_text: string;
   view_mode: "active" | "spectating" | "finished";
 };

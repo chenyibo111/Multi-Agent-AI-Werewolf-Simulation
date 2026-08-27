@@ -164,6 +164,12 @@ def _state_view(
         if observation is not None and any(action in target_actions for action in human_actions)
         else []
     )
+    fixed_target_ids: dict[str, str] = {}
+    if observation is not None and CommandKind.WITCH_SAVE in human_actions:
+        night_victim_id = observation.private_facts.get("night_victim_id")
+        if isinstance(night_victim_id, str) and night_victim_id in observation.legal_target_ids:
+            fixed_target_ids[CommandKind.WITCH_SAVE.value] = night_victim_id
+    view["fixed_target_ids"] = fixed_target_ids
     view["phase_text"] = {
         "night_wolf": "狼人行动",
         "night_seer": "预言家查验",

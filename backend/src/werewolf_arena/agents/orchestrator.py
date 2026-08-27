@@ -10,7 +10,7 @@ from werewolf_arena.domain.engine import GameEngine
 from werewolf_arena.domain.enums import CommandKind, Phase
 from werewolf_arena.domain.models import AgentUsage, GameCommand, GameState, Participant
 
-from .budget import AgentBudget, AgentRunRecord
+from .budget import MODEL_COMPLETION_MAX_TOKENS, AgentBudget, AgentRunRecord
 from .models import AgentDecision, AgentMemory, AgentObservation
 from .observation import build_observation
 
@@ -40,10 +40,12 @@ class GameOrchestrator:
         engine: GameEngine,
         policies: Mapping[str, DecisionPolicy],
         budget: AgentBudget | None = None,
+        max_output_tokens: int = MODEL_COMPLETION_MAX_TOKENS,
     ) -> None:
         self._engine = engine
         self._policies = policies
         self._budget = budget or AgentBudget()
+        self._max_output_tokens = max_output_tokens
 
     async def advance(self, state: GameState) -> OrchestrationResult:
         """Run all safe automatic work until a live human action or terminal state."""
@@ -164,7 +166,7 @@ class GameOrchestrator:
         agent_runs: list[AgentRunRecord],
     ) -> tuple[AgentDecision, GameState]:
         policy = self._policies.get(actor.participant_id)
-        reservation = self._budget.reserve(state.agent_usage, estimated_output_tokens=256)
+        reservation = self._budget.reserve(state.agent_usage, self._max_output_tokens)
         if not reservation.allowed:
             return AgentDecision(kind=CommandKind.NOOP, failure_kind=reservation.reason), state
         decision = (

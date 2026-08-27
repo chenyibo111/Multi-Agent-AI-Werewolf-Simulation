@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from werewolf_arena.agents.budget import MODEL_COMPLETION_MAX_TOKENS
 from werewolf_arena.agents.config import LLMConfigurationError, LLMSettings
 from werewolf_arena.agents.model_client import AsyncModelClient, OpenAICompatibleClient
 from werewolf_arena.agents.orchestrator import GameOrchestrator
@@ -32,23 +33,30 @@ def create_app(database_path: Path | None = None, model_client: AsyncModelClient
     configured_database = Path(os.environ.get("WEREWOLF_ARENA_DATABASE_PATH", "werewolf_arena.db"))
     repository = SQLiteRoomRepository(database_path or configured_database)
     engine = GameEngine(standard_role_registry(), standard_six_player_mode(), seed=7)
+    settings: LLMSettings | None = None
     if model_client is None:
         try:
-            model_client = OpenAICompatibleClient(LLMSettings.from_environment())
+            settings = LLMSettings.from_environment()
+            model_client = OpenAICompatibleClient(settings)
         except LLMConfigurationError:
             model_client = None
+    max_output_tokens = settings.max_output_tokens if settings is not None else MODEL_COMPLETION_MAX_TOKENS
 
     def orchestrator_factory(state: GameState) -> GameOrchestrator:
         policies = (
             {
-                participant.participant_id: AgentPolicy(participant.participant_id, model_client)
+                participant.participant_id: AgentPolicy(
+                    participant.participant_id,
+                    model_client,
+                    max_output_tokens=max_output_tokens,
+                )
                 for participant in state.participants
                 if not participant.is_human
             }
             if model_client is not None
             else {}
         )
-        return GameOrchestrator(engine, policies)
+        return GameOrchestrator(engine, policies, max_output_tokens=max_output_tokens)
 
     runtime_registry = RoomRuntimeRegistry(engine, repository, orchestrator_factory)
 

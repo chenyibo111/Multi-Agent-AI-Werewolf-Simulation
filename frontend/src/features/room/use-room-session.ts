@@ -110,7 +110,11 @@ export function useRoomSession(roomId: string, apiClient: ApiClient): RoomSessio
 
     void (async () => {
       try {
-        applyPayload(await apiClient.getRoom(roomId));
+        const initial = await apiClient.getRoom(roomId);
+        applyPayload(initial);
+        if (initial.state.status === "running" && !initial.state.waiting_for_human) {
+          applyPayload(await apiClient.continueRoom(roomId));
+        }
         connect();
       } catch (caught) {
         setError(messageFor(caught));
