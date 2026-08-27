@@ -17,6 +17,17 @@ class AgentMemory(BaseModel):
     through_sequence: int = 0
 
 
+class PublicPlayer(BaseModel):
+    """A role-safe player reference used by an agent to discuss the public game."""
+
+    model_config = ConfigDict(frozen=True)
+
+    participant_id: str
+    display_name: str
+    seat_number: int | None = None
+    alive: bool
+
+
 class AgentObservation(BaseModel):
     """The complete and intentionally limited context available to one AI player."""
 
@@ -25,6 +36,7 @@ class AgentObservation(BaseModel):
     participant_id: str
     phase: Phase
     public_events: tuple[dict[str, object], ...] = ()
+    public_players: tuple[PublicPlayer, ...] = ()
     private_events: tuple[dict[str, object], ...] = ()
     private_facts: dict[str, object] = Field(default_factory=dict)
     legal_kinds: tuple[CommandKind, ...] = ()
@@ -41,6 +53,7 @@ class AgentDecision(BaseModel):
     target_id: str | None = None
     speech: str = ""
     public_reason: str = ""
+    team_message: str = ""
     failure_kind: str | None = None
     input_tokens: int = 0
     output_tokens: int = 0

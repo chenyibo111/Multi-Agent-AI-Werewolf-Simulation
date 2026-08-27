@@ -78,4 +78,5 @@ def test_witch_room_exposes_only_the_fixed_antidote_target(tmp_path) -> None:
     assert response.status_code == 201
     state = response.json()["state"]
     assert state["phase"] == "night_witch"
-    assert state["fixed_target_ids"] == {"witch_save": "ai-1"}
+    assert set(state["fixed_target_ids"]) == {"witch_save"}
+    assert state["fixed_target_ids"]["witch_save"] in state["legal_target_ids"]

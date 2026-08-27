@@ -1,7 +1,7 @@
 from werewolf_arena.domain.engine import GameEngine, replay
 from werewolf_arena.domain.enums import CommandKind, GameStatus, Phase, Visibility
 from werewolf_arena.domain.mode import standard_six_player_mode
-from werewolf_arena.domain.models import GameCommand
+from werewolf_arena.domain.models import GameCommand, Participant
 from werewolf_arena.domain.projection import (
     ViewerContext,
     ViewerKind,
@@ -28,8 +28,23 @@ def test_alive_villager_cannot_receive_wolf_identity_or_private_seer_event() -> 
     view = project_state(state, viewer)
     events = project_events(state.events, viewer, state)
 
+    assert view["participants"][wolf.participant_id]["seat_number"] == wolf.seat_number
     assert "role_id" not in view["participants"][wolf.participant_id]
     assert all(event["event_type"] != "inspection_result" for event in events)
+
+
+def test_projection_omits_a_missing_legacy_seat_number() -> None:
+    """Saved rooms from before seat assignment must not render every player as seat zero."""
+    engine = GameEngine(standard_role_registry(), standard_six_player_mode(), seed=7)
+    state = engine.create_game("human", requested_role_id="villager")
+    legacy_human = Participant.model_validate(
+        state.participants[0].model_dump(exclude={"seat_number"})
+    )
+    state = state.model_copy(update={"participants": (legacy_human, *state.participants[1:])})
+
+    view = project_state(state, ViewerContext("human", ViewerKind.ALIVE_HUMAN))
+
+    assert "seat_number" not in view["participants"][legacy_human.participant_id]
 
 
 def test_dead_human_sees_only_public_events_until_finished() -> None:

@@ -18,6 +18,7 @@ function eventText(event: RoomEvent, participants: Record<string, ProjectedParti
     });
     if (votes.length) return `投票结果：${votes.join("；")}。`;
   }
+  if (event.event_type === "wolf_team_suggestion" && typeof payload.actor_id === "string" && typeof payload.target_id === "string" && typeof payload.message === "string") return `狼人同伴 ${displayName(payload.actor_id, participants)} 建议击杀 ${displayName(payload.target_id, participants)}：${payload.message}`;
   if (event.event_type === "execution" && typeof payload.target_id === "string") return `${displayName(payload.target_id, participants)} 被放逐出局。`;
   if (event.event_type === "vote_no_execution") return "本轮无人被放逐。";
   if (event.event_type === "vote_tied") return "投票平局，本轮无人被放逐。";

@@ -159,6 +159,18 @@ def _state_view(
         CommandKind.VOTE,
     }
     observation = build_observation(state, viewer.participant_id) if is_active else None
+    participant = next(item for item in state.participants if item.participant_id == viewer.participant_id)
+    if is_active and participant.role_id == "wolf":
+        view["wolf_teammates"] = [
+            {
+                "participant_id": item.participant_id,
+                "display_name": item.display_name,
+                "seat_number": item.seat_number,
+                "alive": item.alive,
+            }
+            for item in state.participants
+            if item.alive and item.role_id == "wolf" and item.participant_id != viewer.participant_id
+        ]
     view["legal_target_ids"] = (
         list(observation.legal_target_ids)
         if observation is not None and any(action in target_actions for action in human_actions)

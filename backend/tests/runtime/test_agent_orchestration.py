@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+from uuid import UUID
 
 from werewolf_arena.agents.budget import AgentBudget
 from werewolf_arena.agents.models import AgentDecision
 from werewolf_arena.agents.orchestrator import GameOrchestrator
 from werewolf_arena.domain.engine import GameEngine
-from werewolf_arena.domain.enums import CommandKind, Phase
+from werewolf_arena.domain.enums import CommandKind, Phase, Visibility
 from werewolf_arena.domain.mode import standard_six_player_mode
 from werewolf_arena.domain.models import GameCommand
 from werewolf_arena.persistence.repository import SQLiteRoomRepository
@@ -152,5 +153,99 @@ def test_submitted_human_vote_starts_ai_votes_without_a_duplicate_command() -> N
             participant.participant_id for participant in state.participants
         }
         assert not any(event.event_type == "command_rejected" for event in advanced.events)
+
+    asyncio.run(scenario())
+
+
+def test_human_wolf_receives_a_private_ai_teammate_suggestion_before_killing() -> None:
+    class WolfAdvisor:
+        calls = 0
+
+        async def decide(self, observation):
+            self.calls += 1
+            return AgentDecision(
+                kind=CommandKind.WOLF_KILL,
+                target_id=observation.legal_target_ids[0],
+                team_message="今晚先从发言最少的人开始。",
+            )
+
+    async def scenario() -> None:
+        engine = GameEngine(standard_role_registry(), standard_six_player_mode(), seed=7)
+        state = engine.create_game("human", requested_role_id="wolf")
+        teammate = next(participant for participant in state.participants if participant.role_id == "wolf" and not participant.is_human)
+        advisor = WolfAdvisor()
+
+        result = await GameOrchestrator(engine, {teammate.participant_id: advisor}).advance(state)
+
+        assert result.waiting_for_human is True
+        assert result.human_actions == (CommandKind.WOLF_KILL, CommandKind.NOOP)
+        assert advisor.calls == 1
+        suggestion = next(event for event in result.state.events if event.event_type == "wolf_team_suggestion")
+        assert suggestion.recipient_ids == frozenset({"human", teammate.participant_id})
+        assert suggestion.payload["actor_id"] == teammate.participant_id
+        assert suggestion.payload["message"] == "今晚先从发言最少的人开始。"
+
+    asyncio.run(scenario())
+
+
+def test_ai_players_speak_again_after_a_new_day_discussion_begins() -> None:
+    class SpeakingPolicy:
+        async def decide(self, observation):
+            return AgentDecision(kind=CommandKind.SPEAK, speech="我会根据公开信息继续判断。")
+
+    async def scenario() -> None:
+        engine = GameEngine(standard_role_registry(), standard_six_player_mode(), seed=7)
+        state = engine.create_game("human", requested_role_id="villager").model_copy(
+            update={"phase": Phase.DAY_DISCUSSION}
+        ).append_event("phase_changed", {"phase": Phase.DAY_DISCUSSION.value}, Visibility.PUBLIC)
+        ai_players = [participant for participant in state.participants if not participant.is_human]
+        for participant in ai_players:
+            state = state.append_event(
+                "public_speech",
+                {"actor_id": participant.participant_id, "text": "上一轮发言。"},
+                Visibility.PUBLIC,
+            )
+        state = state.append_event("phase_changed", {"phase": Phase.DAY_DISCUSSION.value}, Visibility.PUBLIC)
+        policies = {participant.participant_id: SpeakingPolicy() for participant in ai_players}
+
+        discussed, waiting = await GameOrchestrator(engine, policies)._run_discussion(state, [])
+
+        assert waiting is True
+        current_day_speeches = [
+            event for event in discussed.events if event.event_type == "public_speech" and event.payload["text"] != "上一轮发言。"
+        ]
+        assert {event.payload["actor_id"] for event in current_day_speeches} == {
+            participant.participant_id for participant in ai_players
+        }
+
+    asyncio.run(scenario())
+
+
+def test_daily_ai_discussion_order_is_deterministic_per_round_and_changes_next_round() -> None:
+    class SpeakingPolicy:
+        async def decide(self, observation):
+            return AgentDecision(kind=CommandKind.SPEAK, speech="根据公开信息继续判断。")
+
+    async def order_for(round_number: int) -> list[str]:
+        engine = GameEngine(standard_role_registry(), standard_six_player_mode(), seed=7)
+        state = engine.create_game("human", requested_role_id="villager").model_copy(
+            update={"game_id": UUID(int=1), "phase": Phase.DAY_DISCUSSION, "round_number": round_number}
+        ).append_event("phase_changed", {"phase": Phase.DAY_DISCUSSION.value}, Visibility.PUBLIC)
+        policies = {
+            participant.participant_id: SpeakingPolicy()
+            for participant in state.participants
+            if not participant.is_human
+        }
+        discussed, _ = await GameOrchestrator(engine, policies)._run_discussion(state, [])
+        return [
+            event.payload["actor_id"]
+            for event in discussed.events
+            if event.event_type == "public_speech"
+        ]
+
+    async def scenario() -> None:
+        first_order = await order_for(1)
+        assert first_order == await order_for(1)
+        assert first_order != await order_for(2)
 
     asyncio.run(scenario())

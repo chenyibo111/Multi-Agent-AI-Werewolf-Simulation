@@ -35,6 +35,8 @@ def project_state(state: GameState, viewer: ViewerContext) -> dict[str, object]:
             "display_name": participant.display_name,
             "alive": participant.alive,
         }
+        if participant.seat_number is not None:
+            item["seat_number"] = participant.seat_number
         if viewer.kind is ViewerKind.FINISHED_REPLAY or participant.participant_id == viewer.participant_id:
             item["role_id"] = participant.role_id
         if participant.participant_id == viewer.participant_id and viewer.kind is ViewerKind.ALIVE_HUMAN:

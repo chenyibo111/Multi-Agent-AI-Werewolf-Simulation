@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { RoomSnapshot } from "../../lib/types";
 import { ActionPanel } from "./ActionPanel";
+import { PrivatePanel } from "./PrivatePanel";
+import { PlayerRail } from "./PlayerRail";
 import { RoomTimeline } from "./RoomTimeline";
 
 const waitingSeerState: RoomSnapshot = {
@@ -137,6 +139,28 @@ describe("RoomTimeline", () => {
     expect(document.body.textContent).not.toContain("never render");
   });
 
+  it("renders a private wolf teammate suggestion with display names", () => {
+    render(
+      <RoomTimeline
+        participants={{
+          human: { participant_id: "human", display_name: "你", alive: true },
+          "ai-1": { participant_id: "ai-1", display_name: "林小雨", alive: true },
+          "ai-2": { participant_id: "ai-2", display_name: "周子墨", alive: true },
+        }}
+        events={[
+          {
+            sequence: 5,
+            event_type: "wolf_team_suggestion",
+            payload: { actor_id: "ai-1", target_id: "ai-2", message: "今晚先从周子墨开始。" },
+            visibility: "private",
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("狼人同伴 林小雨 建议击杀 周子墨：今晚先从周子墨开始。")) .toBeVisible();
+  });
+
   it("renders unknown events as a safe generic line instead of serializing payload fields", () => {
     render(
       <RoomTimeline
@@ -154,5 +178,21 @@ describe("RoomTimeline", () => {
     expect(screen.getByText("对局状态已更新。")) .toBeVisible();
     expect(document.body.textContent).not.toContain("agent_memory");
     expect(document.body.textContent).not.toContain("never render");
+  });
+});
+
+describe("PrivatePanel", () => {
+  it("shows an active wolf their living teammate", () => {
+    render(<PrivatePanel state={{ ...waitingSeerState, participants: { ...waitingSeerState.participants, human: { participant_id: "human", display_name: "你", alive: true, role_id: "wolf" } }, wolf_teammates: [{ participant_id: "ai-1", display_name: "林小雨", seat_number: 2, alive: true }] }} />);
+
+    expect(screen.getByText("你的狼人同伴：2号 林小雨")).toBeVisible();
+  });
+});
+
+describe("PlayerRail", () => {
+  it("shows the randomized public seat number", () => {
+    render(<PlayerRail state={{ ...waitingSeerState, participants: { "ai-1": { participant_id: "ai-1", display_name: "林小雨", seat_number: 4, alive: true } } }} />);
+
+    expect(screen.getByText("4号 林小雨")).toBeVisible();
   });
 });

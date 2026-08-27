@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import random
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
 from werewolf_arena.domain.engine import GameEngine
-from werewolf_arena.domain.enums import CommandKind, Phase
+from werewolf_arena.domain.enums import CommandKind, Phase, Visibility
 from werewolf_arena.domain.models import AgentUsage, GameCommand, GameState, Participant
 
 from .budget import MODEL_COMPLETION_MAX_TOKENS, AgentBudget, AgentRunRecord
@@ -54,6 +55,8 @@ class GameOrchestrator:
             actors = self._actors_for_phase(state)
             human = next((item for item in actors if item.is_human), None)
             if human is not None and not self._has_submitted_command(state, human.participant_id):
+                if state.phase is Phase.NIGHT_WOLF and human.role_id == "wolf":
+                    state = await self._suggest_target_to_human_wolf(state, actors, agent_runs)
                 return OrchestrationResult(state, True, self._human_actions(state, human), tuple(agent_runs))
             if state.phase is Phase.NIGHT_WOLF:
                 state = await self._run_wolf_team(state, actors, agent_runs)
@@ -126,6 +129,49 @@ class GameOrchestrator:
             )
         return state
 
+    async def _suggest_target_to_human_wolf(
+        self,
+        state: GameState,
+        actors: tuple[Participant, ...],
+        agent_runs: list[AgentRunRecord],
+    ) -> GameState:
+        """Ask one AI wolf for a private recommendation before a human wolf commits."""
+        if self._has_current_wolf_suggestion(state):
+            return state
+        advisor = next((actor for actor in actors if not actor.is_human), None)
+        if advisor is None:
+            return state
+        decision, state = await self._decision(state, advisor, agent_runs)
+        if decision.kind is not CommandKind.WOLF_KILL or decision.target_id is None:
+            return state
+        recipients = frozenset(actor.participant_id for actor in actors if actor.alive)
+        return state.append_event(
+            "wolf_team_suggestion",
+            {
+                "actor_id": advisor.participant_id,
+                "target_id": decision.target_id,
+                "message": decision.team_message or "我建议优先击杀这个目标。",
+            },
+            visibility=Visibility.PRIVATE,
+            recipient_ids=recipients,
+        )
+
+    @staticmethod
+    def _has_current_wolf_suggestion(state: GameState) -> bool:
+        """Only one advice event belongs to each night-wolf phase, including after reloads."""
+        phase_start = max(
+            (
+                event.sequence
+                for event in state.events
+                if event.event_type == "phase_changed" and event.payload.get("phase") == Phase.NIGHT_WOLF.value
+            ),
+            default=0,
+        )
+        return any(
+            event.event_type == "wolf_team_suggestion" and event.sequence > phase_start
+            for event in state.events
+        )
+
     async def _run_individual_phase(
         self,
         state: GameState,
@@ -147,7 +193,8 @@ class GameOrchestrator:
         agent_runs: list[AgentRunRecord],
     ) -> tuple[GameState, bool]:
         spoken_ids = self._spoken_ids(state)
-        ai_players = tuple(item for item in state.participants if item.alive and not item.is_human)
+        ai_players = [item for item in state.participants if item.alive and not item.is_human]
+        random.Random(f"{state.game_id}:{state.round_number}:day_discussion").shuffle(ai_players)
         for actor in ai_players:
             if actor.participant_id in spoken_ids:
                 continue
@@ -163,9 +210,17 @@ class GameOrchestrator:
     @staticmethod
     def _spoken_ids(state: GameState) -> set[str]:
         spoken_ids: set[str] = set()
+        discussion_started_at = max(
+            (
+                event.sequence
+                for event in state.events
+                if event.event_type == "phase_changed" and event.payload.get("phase") == Phase.DAY_DISCUSSION.value
+            ),
+            default=0,
+        )
         for event in state.events:
             actor_id = event.payload.get("actor_id")
-            if event.event_type == "public_speech" and isinstance(actor_id, str):
+            if event.sequence > discussion_started_at and event.event_type == "public_speech" and isinstance(actor_id, str):
                 spoken_ids.add(actor_id)
         return spoken_ids
 

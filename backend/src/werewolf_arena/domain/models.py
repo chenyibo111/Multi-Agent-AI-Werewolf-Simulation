@@ -25,6 +25,7 @@ class Participant(DomainModel):
     role_id: str
     role_version: str = "1.0.0"
     faction: Faction
+    seat_number: int | None = None
     is_human: bool = False
     alive: bool = True
     private_state: dict[str, object] = Field(default_factory=dict)

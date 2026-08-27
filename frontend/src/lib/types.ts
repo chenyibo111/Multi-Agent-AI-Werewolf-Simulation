@@ -18,6 +18,7 @@ export type HumanCommand = {
 export type ProjectedParticipant = {
   participant_id: string;
   display_name: string;
+  seat_number?: number;
   alive: boolean;
   role_id?: string;
   private_state?: Record<string, unknown>;
@@ -33,6 +34,7 @@ export type RoomSnapshot = {
   human_actions: HumanAction[];
   legal_target_ids: string[];
   fixed_target_ids?: Partial<Record<HumanAction, string>>;
+  wolf_teammates?: ProjectedParticipant[];
   phase_text: string;
   view_mode: "active" | "spectating" | "finished";
 };
