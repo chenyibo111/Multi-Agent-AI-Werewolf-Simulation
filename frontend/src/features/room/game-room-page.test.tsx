@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { RoomSnapshot } from "../../lib/types";
 import { ActionPanel } from "./ActionPanel";
+import { PrivatePanel } from "./PrivatePanel";
+import { PlayerRail } from "./PlayerRail";
 import { RoomTimeline } from "./RoomTimeline";
 
 const waitingSeerState: RoomSnapshot = {
@@ -61,6 +63,16 @@ describe("ActionPanel", () => {
 });
 
 describe("RoomTimeline", () => {
+  it("renders internal phase changes as Chinese stage names", () => {
+    render(
+      <RoomTimeline
+        events={[{ sequence: 2, event_type: "phase_changed", payload: { phase: "night_seer" }, visibility: "public" }]}
+      />,
+    );
+
+    expect(screen.getByText("阶段切换：预言家查验阶段")).toBeVisible();
+  });
+
   it("renders a private seer inspection result without exposing unrelated payload fields", () => {
     render(
       <RoomTimeline
@@ -76,6 +88,38 @@ describe("RoomTimeline", () => {
     );
 
     expect(screen.getByText("查验结果：ai-2 是狼人。")) .toBeVisible();
+    expect(document.body.textContent).not.toContain("never render");
+  });
+
+  it("renders witch target and action-result events with player names", () => {
+    render(
+      <RoomTimeline
+        participants={{ "ai-1": { participant_id: "ai-1", display_name: "林小雨", alive: true } }}
+        events={[
+          {
+            sequence: 3,
+            event_type: "witch_night_target",
+            payload: { target_id: "ai-1" },
+            visibility: "private",
+          },
+          {
+            sequence: 4,
+            event_type: "witch_action_result",
+            payload: {
+              saved_target_id: "ai-1",
+              poisoned_target_id: null,
+              antidote_available: false,
+              poison_available: true,
+              secret: "never render",
+            },
+            visibility: "private",
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("女巫得知：今晚被袭击的是林小雨。")) .toBeVisible();
+    expect(screen.getByText("女巫行动：救下林小雨；解药已用，毒药可用。")) .toBeVisible();
     expect(document.body.textContent).not.toContain("never render");
   });
 
@@ -137,6 +181,28 @@ describe("RoomTimeline", () => {
     expect(document.body.textContent).not.toContain("never render");
   });
 
+  it("renders a private wolf teammate suggestion with display names", () => {
+    render(
+      <RoomTimeline
+        participants={{
+          human: { participant_id: "human", display_name: "你", alive: true },
+          "ai-1": { participant_id: "ai-1", display_name: "林小雨", alive: true },
+          "ai-2": { participant_id: "ai-2", display_name: "周子墨", alive: true },
+        }}
+        events={[
+          {
+            sequence: 5,
+            event_type: "wolf_team_suggestion",
+            payload: { actor_id: "ai-1", target_id: "ai-2", message: "今晚先从周子墨开始。" },
+            visibility: "private",
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("狼人同伴 林小雨 建议击杀 周子墨：今晚先从周子墨开始。")) .toBeVisible();
+  });
+
   it("renders unknown events as a safe generic line instead of serializing payload fields", () => {
     render(
       <RoomTimeline
@@ -154,5 +220,52 @@ describe("RoomTimeline", () => {
     expect(screen.getByText("对局状态已更新。")) .toBeVisible();
     expect(document.body.textContent).not.toContain("agent_memory");
     expect(document.body.textContent).not.toContain("never render");
+  });
+});
+
+describe("PrivatePanel", () => {
+  it("renders the active player's role in Chinese", () => {
+    render(<PrivatePanel state={waitingSeerState} />);
+
+    expect(screen.getByText("预言家")).toBeVisible();
+  });
+
+  it("shows an active wolf their living teammate", () => {
+    render(<PrivatePanel state={{ ...waitingSeerState, participants: { ...waitingSeerState.participants, human: { participant_id: "human", display_name: "你", alive: true, role_id: "wolf" } }, wolf_teammates: [{ participant_id: "ai-1", display_name: "林小雨", seat_number: 2, alive: true }] }} />);
+
+    expect(screen.getByText("你的狼人同伴：2号 林小雨")).toBeVisible();
+  });
+
+  it("shows a witch their current antidote and poison availability", () => {
+    render(<PrivatePanel state={{
+      ...waitingSeerState,
+      participants: {
+        ...waitingSeerState.participants,
+        human: {
+          participant_id: "human",
+          display_name: "你",
+          alive: true,
+          role_id: "witch",
+          private_state: { antidote_available: true, poison_available: false },
+        },
+      },
+    }} />);
+
+    expect(screen.getByText("解药：可用；毒药：已用")).toBeVisible();
+  });
+});
+
+describe("PlayerRail", () => {
+  it("shows explicit life status and Chinese labels only for authorized roles", () => {
+    render(<PlayerRail state={{ ...waitingSeerState, participants: {
+      "ai-1": { participant_id: "ai-1", display_name: "林小雨", seat_number: 4, alive: true, role_id: "witch" },
+      "ai-2": { participant_id: "ai-2", display_name: "周子墨", seat_number: 5, alive: false },
+    } }} />);
+
+    expect(screen.getByText("4号 林小雨")).toBeVisible();
+    expect(screen.getByText("存活")).toBeVisible();
+    expect(screen.getByText("已出局")).toBeVisible();
+    expect(screen.getByText("女巫")).toBeVisible();
+    expect(screen.queryByText("狼人")).not.toBeInTheDocument();
   });
 });

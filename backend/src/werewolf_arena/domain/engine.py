@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+import secrets
 
 from werewolf_arena.roles.registry import RoleRegistry
 
@@ -21,7 +22,7 @@ def _ai_display_name(index: int) -> str:
 class GameEngine:
     """验证角色、创建确定性阵容，并接收后续阶段命令。"""
 
-    def __init__(self, registry: RoleRegistry, mode: GameMode, seed: int = 7) -> None:
+    def __init__(self, registry: RoleRegistry, mode: GameMode, seed: int | None = None) -> None:
         mode.validate(registry)
         self._registry = registry
         self._mode = mode
@@ -30,6 +31,7 @@ class GameEngine:
     def create_game(self, human_participant_id: str, requested_role_id: str | None) -> GameState:
         """创建标准阵容，并保证被请求的人类身份占用一个合法槽位。"""
 
+        randomizer = random.Random(self._seed if self._seed is not None else secrets.randbits(64))
         role_slots = list(self._mode.role_slots)
         if requested_role_id is not None:
             if requested_role_id not in role_slots:
@@ -37,10 +39,8 @@ class GameEngine:
             role_slots.remove(requested_role_id)
             human_role = requested_role_id
         else:
-            randomizer = random.Random(self._seed)
             randomizer.shuffle(role_slots)
             human_role = role_slots.pop()
-        randomizer = random.Random(self._seed)
         randomizer.shuffle(role_slots)
 
         participants = [self._participant(human_participant_id, "你", human_role, is_human=True)]
@@ -48,7 +48,12 @@ class GameEngine:
             self._participant(f"ai-{index + 1}", _ai_display_name(index), role_id)
             for index, role_id in enumerate(role_slots)
         )
-        state = GameState.empty().model_copy(update={"participants": tuple(participants), "phase": Phase.NIGHT_WOLF})
+        randomizer.shuffle(participants)
+        seated_participants = tuple(
+            participant.model_copy(update={"seat_number": seat_number})
+            for seat_number, participant in enumerate(participants, start=1)
+        )
+        state = GameState.empty().model_copy(update={"participants": seated_participants, "phase": Phase.NIGHT_WOLF})
         state = state.append_event("game_created", {}, Visibility.SERVER)
         return state.append_event("phase_changed", {"phase": Phase.NIGHT_WOLF.value}, Visibility.PUBLIC)
 
@@ -134,7 +139,7 @@ class GameEngine:
         if state.phase is Phase.NIGHT_SEER:
             seer = next((item for item in state.participants if item.alive and item.role_id == "seer"), None)
             if seer is None:
-                return self._change_phase(state, Phase.NIGHT_WITCH)
+                return self._notify_witch_of_night_target(self._change_phase(state, Phase.NIGHT_WITCH))
             command = next((item for item in state.pending_commands if item.actor_id == seer.participant_id), None)
             if command is None:
                 return state
@@ -147,7 +152,7 @@ class GameEngine:
                     Visibility.PRIVATE,
                     frozenset({seer.participant_id}),
                 )
-            return self._change_phase(state, Phase.NIGHT_WITCH)
+            return self._notify_witch_of_night_target(self._change_phase(state, Phase.NIGHT_WITCH))
         if state.phase is Phase.NIGHT_WITCH:
             witch = next((item for item in state.participants if item.alive and item.role_id == "witch"), None)
             command = (
@@ -171,7 +176,11 @@ class GameEngine:
                 else None
             )
             updated_private_state = (
-                {**witch.private_state, resource_key: False} if witch is not None and resource_key is not None else {}
+                {**witch.private_state, resource_key: False}
+                if witch is not None and resource_key is not None
+                else dict(witch.private_state)
+                if witch is not None
+                else {}
             )
             participants = tuple(
                 item.model_copy(update={"alive": False})
@@ -182,6 +191,18 @@ class GameEngine:
                 for item in state.participants
             )
             state = state.model_copy(update={"participants": participants, "pending_commands": ()})
+            if witch is not None:
+                state = state.append_event(
+                    "witch_action_result",
+                    {
+                        "saved_target_id": victim if saved else None,
+                        "poisoned_target_id": poisoned,
+                        "antidote_available": bool(updated_private_state.get("antidote_available")),
+                        "poison_available": bool(updated_private_state.get("poison_available")),
+                    },
+                    Visibility.PRIVATE,
+                    frozenset({witch.participant_id}),
+                )
             state = state.append_event(
                 "night_announcement",
                 {"death_count": len(dead_ids), "death_ids": sorted(dead_ids)},
@@ -246,6 +267,19 @@ class GameEngine:
         return None
 
     @staticmethod
+    def _notify_witch_of_night_target(state: GameState) -> GameState:
+        witch = next((item for item in state.participants if item.alive and item.role_id == "witch"), None)
+        victim = GameEngine._night_victim(state)
+        if witch is None or victim is None:
+            return state
+        return state.append_event(
+            "witch_night_target",
+            {"target_id": victim},
+            Visibility.PRIVATE,
+            frozenset({witch.participant_id}),
+        )
+
+    @staticmethod
     def _finish_if_winner(state: GameState) -> GameState:
         wolves = [item for item in state.participants if item.alive and item.faction is Faction.WOLF]
         good = [item for item in state.participants if item.alive and item.faction is Faction.GOOD]
@@ -259,7 +293,8 @@ class GameEngine:
 
     @staticmethod
     def _change_phase(state: GameState, phase: Phase) -> GameState:
-        return state.model_copy(update={"phase": phase}).append_event(
+        round_number = state.round_number + 1 if phase is Phase.NIGHT_WOLF and state.phase is not Phase.NIGHT_WOLF else state.round_number
+        return state.model_copy(update={"phase": phase, "round_number": round_number}).append_event(
             "phase_changed", {"phase": phase.value}, Visibility.PUBLIC
         )
 

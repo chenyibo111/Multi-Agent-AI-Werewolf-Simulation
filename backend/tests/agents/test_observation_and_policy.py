@@ -43,13 +43,25 @@ def test_observation_removes_noise_and_bounds_public_history() -> None:
 
     observation = build_observation(state, "ai-1")
 
-    assert [event["event_type"] for event in observation.public_events] == ["public_speech"] * 20
+    assert [event["event_type"] for event in observation.public_events] == ["public_speech"] * 22
     assert [event["payload"]["text"] for event in observation.public_events] == [
-        f"speech-{index}" for index in range(2, 22)
+        f"speech-{index}" for index in range(22)
     ]
     assert observation.private_events == (
         {"sequence": 4, "event_type": "inspection_result", "payload": {"target_id": "ai-1"}},
     )
+
+
+def test_observation_includes_named_public_roster_without_roles() -> None:
+    engine = GameEngine(standard_role_registry(), standard_six_player_mode(), seed=7)
+    state = engine.create_game("human", requested_role_id="villager")
+
+    observation = build_observation(state, "ai-1")
+
+    assert len(observation.public_players) == len(state.participants)
+    assert observation.public_players[0].display_name
+    assert observation.public_players[0].seat_number >= 1
+    assert "role_id" not in observation.public_players[0].model_dump()
 
 
 def test_policy_rejects_model_actor_override_and_returns_safe_noop() -> None:
@@ -109,7 +121,27 @@ def test_policy_accepts_action_alias_and_sends_explicit_json_contract() -> None:
         assert "legal_target_ids" in client.system_prompt
         assert 'never "action"' in client.system_prompt
         assert "中文" in client.system_prompt
+        assert "昵称" in client.system_prompt
+        assert "ai-" in client.system_prompt
         assert client.max_output_tokens == MODEL_COMPLETION_MAX_TOKENS
+
+    asyncio.run(scenario())
+
+
+def test_policy_replaces_internal_ids_in_public_speech_with_display_names() -> None:
+    class ScriptedClient:
+        async def complete(self, *args: object, **kwargs: object) -> ModelCompletion:
+            return ModelCompletion('{"kind":"speak","speech":"我怀疑 ai-2 的发言。"}')
+
+    async def scenario() -> None:
+        engine = GameEngine(standard_role_registry(), standard_six_player_mode(), seed=7)
+        state = engine.create_game("human", requested_role_id="villager").model_copy(
+            update={"phase": Phase.DAY_DISCUSSION}
+        )
+        decision = await AgentPolicy("ai-1", ScriptedClient()).decide(build_observation(state, "ai-1"))
+        expected_name = next(player.display_name for player in state.participants if player.participant_id == "ai-2")
+
+        assert decision.speech == f"我怀疑 {expected_name} 的发言。"
 
     asyncio.run(scenario())
 

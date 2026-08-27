@@ -5,10 +5,11 @@ from __future__ import annotations
 from werewolf_arena.domain.enums import CommandKind, Phase, Visibility
 from werewolf_arena.domain.models import GameEvent, GameState, Participant
 
-from .models import AgentMemory, AgentObservation
+from .models import AgentMemory, AgentObservation, PublicPlayer
 
-_PUBLIC_CONTEXT_LIMIT = 20
-_PUBLIC_NOISE_EVENT_TYPES = frozenset({"phase_changed", "command_rejected"})
+_PUBLIC_REASONING_EVENT_TYPES = frozenset(
+    {"public_speech", "night_announcement", "vote_result", "execution", "vote_tied", "vote_no_execution", "game_finished"}
+)
 
 
 def build_observation(state: GameState, participant_id: str) -> AgentObservation:
@@ -37,6 +38,15 @@ def build_observation(state: GameState, participant_id: str) -> AgentObservation
         participant_id=participant_id,
         phase=state.phase,
         public_events=_public_context_events(state.events),
+        public_players=tuple(
+            PublicPlayer(
+                participant_id=item.participant_id,
+                display_name=item.display_name,
+                seat_number=item.seat_number,
+                alive=item.alive,
+            )
+            for item in state.participants
+        ),
         private_events=tuple(
             _event_view(event)
             for event in state.events
@@ -56,13 +66,13 @@ def build_observation(state: GameState, participant_id: str) -> AgentObservation
 
 
 def _public_context_events(events: tuple[GameEvent, ...]) -> tuple[dict[str, object], ...]:
-    """Keep a bounded, decision-relevant public history for model prompts."""
+    """Keep the complete, compact public facts needed to reason across rounds."""
     relevant_events = tuple(
         event
         for event in events
-        if event.visibility is Visibility.PUBLIC and event.event_type not in _PUBLIC_NOISE_EVENT_TYPES
+        if event.visibility is Visibility.PUBLIC and event.event_type in _PUBLIC_REASONING_EVENT_TYPES
     )
-    return tuple(_event_view(event) for event in relevant_events[-_PUBLIC_CONTEXT_LIMIT:])
+    return tuple(_event_view(event) for event in relevant_events)
 
 
 def _participant(state: GameState, participant_id: str) -> Participant:

@@ -25,6 +25,7 @@ def test_room_rest_lifecycle_requires_its_own_bearer_token(tmp_path) -> None:
         state = created_payload["state"]
         assert state["participants"]["human"]["role_id"] == "wolf"
         assert "role_id" not in state["participants"]["ai-1"]
+        wolf_target_id = state["legal_target_ids"][0]
 
         assert client.get(f"/api/rooms/{room_id}").status_code == 200
 
@@ -44,11 +45,11 @@ def test_room_rest_lifecycle_requires_its_own_bearer_token(tmp_path) -> None:
         command = client.post(
             f"/api/rooms/{room_id}/commands",
             headers=headers,
-            json={"kind": "wolf_kill", "target_id": "ai-1"},
+            json={"kind": "wolf_kill", "target_id": wolf_target_id},
         )
         assert command.status_code == 200
         assert command.json()["accepted"] is True
-        assert command.json()["state"]["participants"]["ai-1"].get("role_id") is None
+        assert command.json()["state"]["participants"][wolf_target_id].get("role_id") is None
 
         deleted = client.delete(f"/api/rooms/{room_id}", headers=headers)
         assert deleted.status_code == 204
@@ -83,8 +84,8 @@ def test_running_room_rejects_finished_report_request(tmp_path) -> None:
     assert response.status_code == 409
 
 
-def test_dead_human_room_view_is_public_spectating_without_actions() -> None:
-    """Death revokes private room controls even if the runtime still has a wait status."""
+def test_dead_human_room_view_is_global_but_without_actions() -> None:
+    """Death enables replay knowledge but never restores command authority."""
     engine = GameEngine(standard_role_registry(), standard_six_player_mode(), seed=7)
     state = engine.create_game("human", requested_role_id="seer")
     dead_state = state.model_copy(
@@ -100,7 +101,7 @@ def test_dead_human_room_view_is_public_spectating_without_actions() -> None:
 
     view = _state_view(
         dead_state,
-        ViewerContext("human", ViewerKind.DEAD_SPECTATOR),
+        ViewerContext("human", ViewerKind.ALIVE_HUMAN),
         waiting_for_human=True,
         human_actions=(CommandKind.INSPECT,),
     )
@@ -109,7 +110,45 @@ def test_dead_human_room_view_is_public_spectating_without_actions() -> None:
     assert view["waiting_for_human"] is False
     assert view["human_actions"] == []
     assert view["legal_target_ids"] == []
-    assert "private_state" not in view["participants"]["human"]
+    assert all("role_id" in participant for participant in view["participants"].values())
+
+
+def test_active_wolf_view_exposes_only_living_teammate_public_identity() -> None:
+    engine = GameEngine(standard_role_registry(), standard_six_player_mode(), seed=7)
+    state = engine.create_game("human", requested_role_id="wolf")
+    teammate = next(
+        participant for participant in state.participants if participant.participant_id != "human" and participant.role_id == "wolf"
+    )
+
+    active_view = _state_view(
+        state,
+        ViewerContext("human", ViewerKind.ALIVE_HUMAN),
+        waiting_for_human=True,
+        human_actions=(CommandKind.WOLF_KILL,),
+    )
+    spectator_view = _state_view(
+        state.model_copy(
+            update={
+                "participants": tuple(
+                    participant.model_copy(update={"alive": False})
+                    if participant.participant_id == "human"
+                    else participant
+                    for participant in state.participants
+                )
+            }
+        ),
+        ViewerContext("human", ViewerKind.DEAD_GLOBAL),
+        waiting_for_human=False,
+        human_actions=(),
+    )
+
+    assert active_view["wolf_teammates"] == [{
+        "participant_id": teammate.participant_id,
+        "display_name": teammate.display_name,
+        "seat_number": teammate.seat_number,
+        "alive": True,
+    }]
+    assert "wolf_teammates" not in spectator_view
 
 
 def test_room_resumes_after_application_restart(tmp_path) -> None:

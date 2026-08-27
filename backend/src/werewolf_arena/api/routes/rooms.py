@@ -40,7 +40,7 @@ async def create_room(payload: CreateRoomRequest, request: Request) -> JSONRespo
     runtime = await registry.create(state)
     result = await runtime.advance_until_waiting()
     session_token = await repository.issue_session(state.game_id, "human")
-    viewer = ViewerContext("human", ViewerKind.ALIVE_HUMAN)
+    viewer = _current_viewer(result.state, "human")
     response = JSONResponse(status_code=status.HTTP_201_CREATED, content={
         "room_id": str(state.game_id),
         "session_token": session_token,
@@ -64,9 +64,10 @@ async def get_room(
     """Return the authenticated player's permission-filtered room snapshot."""
     state = await authorized.runtime.get_state()
     current = await authorized.runtime.current_wait_status()
+    viewer = _current_viewer(state, authorized.participant_id)
     return {
-        "state": _state_view(state, authorized.viewer, current.waiting_for_human, current.human_actions),
-        "events": project_events(state.events, authorized.viewer, state),
+        "state": _state_view(state, viewer, current.waiting_for_human, current.human_actions),
+        "events": project_events(state.events, viewer, state),
     }
 
 
@@ -102,10 +103,11 @@ async def submit_command(
     if rejection is not None:
         detail = rejection.payload.get("reason", "command_rejected")
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail)
+    viewer = _current_viewer(result.state, authorized.participant_id)
     return {
         "accepted": True,
-        "state": _state_view(result.state, authorized.viewer, result.waiting_for_human, result.human_actions),
-        "events": project_events(new_events, authorized.viewer, result.state),
+        "state": _state_view(result.state, viewer, result.waiting_for_human, result.human_actions),
+        "events": project_events(new_events, viewer, result.state),
     }
 
 
@@ -115,9 +117,10 @@ async def continue_room(
 ) -> dict[str, object]:
     """Resume automatic AI work after an authorized reconnect or server restart."""
     result = await authorized.runtime.advance_until_waiting()
+    viewer = _current_viewer(result.state, authorized.participant_id)
     return {
-        "state": _state_view(result.state, authorized.viewer, result.waiting_for_human, result.human_actions),
-        "events": project_events(result.state.events, authorized.viewer, result.state),
+        "state": _state_view(result.state, viewer, result.waiting_for_human, result.human_actions),
+        "events": project_events(result.state.events, viewer, result.state),
     }
 
 
@@ -140,13 +143,14 @@ def _state_view(
     waiting_for_human: bool,
     human_actions: tuple[CommandKind, ...],
 ) -> dict[str, object]:
+    viewer = _current_viewer(state, viewer.participant_id)
     view = project_state(state, viewer)
     is_active = viewer.kind is ViewerKind.ALIVE_HUMAN and state.status.value != "finished"
     view["view_mode"] = (
         "finished"
         if state.status.value == "finished"
         else "spectating"
-        if viewer.kind is ViewerKind.DEAD_SPECTATOR
+        if viewer.kind is ViewerKind.DEAD_GLOBAL
         else "active"
     )
     view["waiting_for_human"] = waiting_for_human if is_active else False
@@ -159,6 +163,18 @@ def _state_view(
         CommandKind.VOTE,
     }
     observation = build_observation(state, viewer.participant_id) if is_active else None
+    participant = next(item for item in state.participants if item.participant_id == viewer.participant_id)
+    if is_active and participant.role_id == "wolf":
+        view["wolf_teammates"] = [
+            {
+                "participant_id": item.participant_id,
+                "display_name": item.display_name,
+                "seat_number": item.seat_number,
+                "alive": item.alive,
+            }
+            for item in state.participants
+            if item.alive and item.role_id == "wolf" and item.participant_id != viewer.participant_id
+        ]
     view["legal_target_ids"] = (
         list(observation.legal_target_ids)
         if observation is not None and any(action in target_actions for action in human_actions)
@@ -179,3 +195,11 @@ def _state_view(
         "finished": "对局结束",
     }.get(state.phase.value, "准备中")
     return view
+
+
+def _current_viewer(state: GameState, participant_id: str) -> ViewerContext:
+    participant = next(item for item in state.participants if item.participant_id == participant_id)
+    return ViewerContext(
+        participant_id,
+        ViewerKind.ALIVE_HUMAN if participant.alive else ViewerKind.DEAD_GLOBAL,
+    )

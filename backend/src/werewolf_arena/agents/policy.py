@@ -19,6 +19,8 @@ class AgentPolicy:
     _SYSTEM_PROMPT = """你正在参与一局中文狼人杀。只返回一个 JSON 对象，不要输出任何额外文字或 Markdown。
 使用字段 \"kind\"，never \"action\"；其值必须严格来自观察数据的 legal_kinds。
 需要目标的行动，target_id 必须严格来自 legal_target_ids。只有 kind 为 speak 时才能填写 speech，且必须是简短、自然的中文公开发言。
+自然语言中只引用 public_players 的昵称（必要时加座位号），不要使用 ai- 等内部 ID。
+仅在狼人夜间行动时可填写 team_message，作为给狼人同伴的简短中文私密建议。
 不要添加此决策契约之外的字段。"""
 
     def __init__(
@@ -58,7 +60,7 @@ class AgentPolicy:
             return self._fallback("model_error")
         if not self._is_allowed(decision, observation):
             return self._fallback("invalid_model_output")
-        return decision
+        return self._replace_internal_ids(decision, observation)
 
     @staticmethod
     def _forced_decision(observation: AgentObservation) -> AgentDecision | None:
@@ -98,11 +100,32 @@ class AgentPolicy:
         }
         if needs_target and decision.target_id not in observation.legal_target_ids:
             return False
-        return not decision.speech or len(decision.speech) <= 500
+        return (
+            (not decision.speech or len(decision.speech) <= 500)
+            and (not decision.team_message or len(decision.team_message) <= 300)
+        )
 
     @staticmethod
     def _fallback(failure_kind: str) -> AgentDecision:
         return AgentDecision(kind=CommandKind.NOOP, failure_kind=failure_kind)
+
+    @staticmethod
+    def _replace_internal_ids(decision: AgentDecision, observation: AgentObservation) -> AgentDecision:
+        """Never expose stable server IDs in human-facing model text."""
+        names = {player.participant_id: player.display_name for player in observation.public_players}
+
+        def replace_ids(text: str) -> str:
+            for participant_id in sorted(names, key=len, reverse=True):
+                text = text.replace(participant_id, names[participant_id])
+            return text
+
+        return decision.model_copy(
+            update={
+                "speech": replace_ids(decision.speech),
+                "public_reason": replace_ids(decision.public_reason),
+                "team_message": replace_ids(decision.team_message),
+            }
+        )
 
 
 def completion_metrics(decision: AgentDecision) -> ModelCompletion:

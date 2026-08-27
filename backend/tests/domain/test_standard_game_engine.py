@@ -20,10 +20,46 @@ def test_requested_human_role_is_reserved_and_roster_is_valid() -> None:
     assert sum(player.role_id == "wolf" for player in state.participants) == 2
 
 
+def test_random_human_role_and_seats_depend_on_the_room_seed() -> None:
+    first = standard_engine(seed=1).create_game("human", requested_role_id=None)
+    second = standard_engine(seed=5).create_game("human", requested_role_id=None)
+
+    assert next(player for player in first.participants if player.is_human).role_id != next(
+        player for player in second.participants if player.is_human
+    ).role_id
+    assert [player.seat_number for player in first.participants] == list(range(1, 7))
+    assert [player.seat_number for player in second.participants] == list(range(1, 7))
+
+
+def test_requested_human_role_stays_fixed_while_seats_are_randomized() -> None:
+    state = standard_engine(seed=2).create_game("human", requested_role_id="witch")
+
+    human = next(player for player in state.participants if player.is_human)
+    assert human.role_id == "witch"
+    assert human.seat_number != 1
+
+
+def test_completed_day_vote_advances_the_round_before_the_next_night() -> None:
+    """Each new night starts a new round, including when nobody is executed."""
+    engine = standard_engine(seed=7)
+    state = engine.create_game("human", requested_role_id="villager").model_copy(
+        update={"phase": Phase.DAY_VOTE}
+    )
+    for participant in state.participants:
+        state = engine.submit(state, GameCommand(actor_id=participant.participant_id, kind=CommandKind.ABSTAIN))
+
+    state = engine.advance_automatic(state)
+
+    assert state.phase is Phase.NIGHT_WOLF
+    assert state.round_number == 2
+
+
 def test_ai_roster_uses_stable_ids_and_human_friendly_chinese_names() -> None:
     state = standard_engine(seed=7).create_game("human", requested_role_id="seer")
 
-    ai_players = [player for player in state.participants if not player.is_human]
+    ai_players = sorted(
+        (player for player in state.participants if not player.is_human), key=lambda player: player.participant_id
+    )
     assert [player.participant_id for player in ai_players] == ["ai-1", "ai-2", "ai-3", "ai-4", "ai-5"]
     assert [player.display_name for player in ai_players] == ["林小雨", "周子墨", "陈星河", "苏晚", "顾言"]
 
@@ -40,8 +76,8 @@ def test_larger_valid_modes_receive_a_fallback_ai_display_name() -> None:
 
     state = engine.create_game("human", requested_role_id="villager")
 
-    assert state.participants[-1].participant_id == "ai-6"
-    assert state.participants[-1].display_name == "新朋友6"
+    sixth_ai = next(player for player in state.participants if player.participant_id == "ai-6")
+    assert sixth_ai.display_name == "新朋友6"
 
 
 def test_dead_participant_command_is_rejected_without_state_change() -> None:
@@ -93,6 +129,71 @@ def test_matched_wolf_attack_can_be_saved_by_witch() -> None:
     assert next(player for player in state.participants if player.participant_id == victim.participant_id).alive
     assert any(event.event_type == "inspection_result" for event in state.events)
     assert any(event.event_type == "night_announcement" for event in state.events)
+
+
+def test_witch_receives_private_night_target_and_save_result() -> None:
+    """A witch can review both the threatened player and her resolved antidote action."""
+    engine = standard_engine(seed=7)
+    state = engine.create_game("human", requested_role_id="wolf")
+    wolves = [player for player in state.participants if player.role_id == "wolf"]
+    victim = next(player for player in state.participants if player.role_id == "villager")
+    seer = next(player for player in state.participants if player.role_id == "seer")
+    witch = next(player for player in state.participants if player.role_id == "witch")
+    for wolf in wolves:
+        state = engine.submit(
+            state, GameCommand(actor_id=wolf.participant_id, kind=CommandKind.WOLF_KILL, target_id=victim.participant_id)
+        )
+    state = engine.advance_automatic(state)
+    state = engine.submit(state, GameCommand(actor_id=seer.participant_id, kind=CommandKind.NOOP))
+    state = engine.advance_automatic(state)
+
+    target_event = next(event for event in state.events if event.event_type == "witch_night_target")
+    assert target_event.visibility.value == "private"
+    assert target_event.recipient_ids == frozenset({witch.participant_id})
+    assert target_event.payload == {"target_id": victim.participant_id}
+
+    state = engine.submit(
+        state, GameCommand(actor_id=witch.participant_id, kind=CommandKind.WITCH_SAVE, target_id=victim.participant_id)
+    )
+    state = engine.advance_automatic(state)
+
+    result_event = next(event for event in state.events if event.event_type == "witch_action_result")
+    assert result_event.visibility.value == "private"
+    assert result_event.recipient_ids == frozenset({witch.participant_id})
+    assert result_event.payload == {
+        "saved_target_id": victim.participant_id,
+        "poisoned_target_id": None,
+        "antidote_available": False,
+        "poison_available": True,
+    }
+
+
+def test_witch_noop_result_keeps_both_abilities_available() -> None:
+    """Skipping a night must not make the private history claim either potion was spent."""
+    engine = standard_engine(seed=7)
+    state = engine.create_game("human", requested_role_id="wolf")
+    wolves = [player for player in state.participants if player.role_id == "wolf"]
+    victim = next(player for player in state.participants if player.role_id == "villager")
+    seer = next(player for player in state.participants if player.role_id == "seer")
+    witch = next(player for player in state.participants if player.role_id == "witch")
+    for wolf in wolves:
+        state = engine.submit(
+            state, GameCommand(actor_id=wolf.participant_id, kind=CommandKind.WOLF_KILL, target_id=victim.participant_id)
+        )
+    state = engine.advance_automatic(state)
+    state = engine.submit(state, GameCommand(actor_id=seer.participant_id, kind=CommandKind.NOOP))
+    state = engine.advance_automatic(state)
+    state = engine.submit(state, GameCommand(actor_id=witch.participant_id, kind=CommandKind.NOOP))
+
+    state = engine.advance_automatic(state)
+
+    result_event = next(event for event in state.events if event.event_type == "witch_action_result")
+    assert result_event.payload == {
+        "saved_target_id": None,
+        "poisoned_target_id": None,
+        "antidote_available": True,
+        "poison_available": True,
+    }
 
 
 def test_dawn_announcement_identifies_the_players_who_died_overnight() -> None:

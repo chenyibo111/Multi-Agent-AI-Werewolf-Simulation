@@ -32,7 +32,7 @@ def create_app(database_path: Path | None = None, model_client: AsyncModelClient
     """Build a local API whose dependencies can later be replaced for deployment."""
     configured_database = Path(os.environ.get("WEREWOLF_ARENA_DATABASE_PATH", "werewolf_arena.db"))
     repository = SQLiteRoomRepository(database_path or configured_database)
-    engine = GameEngine(standard_role_registry(), standard_six_player_mode(), seed=7)
+    engine = GameEngine(standard_role_registry(), standard_six_player_mode())
     settings: LLMSettings | None = None
     if model_client is None:
         try:
