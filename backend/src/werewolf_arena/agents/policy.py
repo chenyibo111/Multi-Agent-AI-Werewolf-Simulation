@@ -6,7 +6,8 @@ import json
 
 from pydantic import ValidationError
 
-from werewolf_arena.domain.enums import CommandKind
+from werewolf_arena.agents.budget import MODEL_COMPLETION_MAX_TOKENS
+from werewolf_arena.domain.enums import CommandKind, Phase
 
 from .model_client import AsyncModelClient, ModelCompletion
 from .models import AgentDecision, AgentObservation
@@ -15,21 +16,35 @@ from .models import AgentDecision, AgentObservation
 class AgentPolicy:
     """Bind a single model policy to one participant and its allowlisted observation."""
 
-    def __init__(self, participant_id: str, model_client: AsyncModelClient) -> None:
+    _SYSTEM_PROMPT = """You are a Werewolf Arena player. Return exactly one JSON object and no prose or Markdown.
+Use the field \"kind\", never \"action\". Its value must be one exact value from the observation's legal_kinds.
+For a targeted action, target_id must be one exact value from legal_target_ids. Use speech only for a speak action.
+Do not add fields that are not part of this decision contract."""
+
+    def __init__(
+        self,
+        participant_id: str,
+        model_client: AsyncModelClient,
+        max_output_tokens: int = MODEL_COMPLETION_MAX_TOKENS,
+    ) -> None:
         self._participant_id = participant_id
         self._model_client = model_client
+        self._max_output_tokens = max_output_tokens
 
     async def decide(self, observation: AgentObservation) -> AgentDecision:
         """Return an allowlisted decision or a safe no-op when the model is unusable."""
         if observation.participant_id != self._participant_id:
             raise ValueError("Agent policy received an observation for another participant")
+        forced_decision = self._forced_decision(observation)
+        if forced_decision is not None:
+            return forced_decision
         try:
             completion = await self._model_client.complete(
-                "You are a Werewolf Arena player. Return only one JSON decision allowed by the observation.",
+                self._SYSTEM_PROMPT,
                 observation.model_dump_json(),
-                max_output_tokens=256,
+                max_output_tokens=self._max_output_tokens,
             )
-            decision = AgentDecision.model_validate(json.loads(completion.text)).model_copy(
+            decision = AgentDecision.model_validate(self._normalize_payload(json.loads(completion.text))).model_copy(
                 update={
                     "input_tokens": completion.input_tokens,
                     "output_tokens": completion.output_tokens,
@@ -44,6 +59,31 @@ class AgentPolicy:
         if not self._is_allowed(decision, observation):
             return self._fallback("invalid_model_output")
         return decision
+
+    @staticmethod
+    def _forced_decision(observation: AgentObservation) -> AgentDecision | None:
+        """Apply temporary deterministic role rules before future role prompts take over."""
+        victim_id = observation.private_facts.get("night_victim_id")
+        resources = observation.private_facts.get("resources")
+        if (
+            observation.phase is Phase.NIGHT_WITCH
+            and CommandKind.WITCH_SAVE in observation.legal_kinds
+            and isinstance(victim_id, str)
+            and victim_id in observation.legal_target_ids
+            and isinstance(resources, dict)
+            and resources.get("antidote_available") is True
+        ):
+            return AgentDecision(kind=CommandKind.WITCH_SAVE, target_id=victim_id)
+        return None
+
+    @staticmethod
+    def _normalize_payload(payload: object) -> object:
+        """Accept the single documented compatibility alias before strict validation."""
+        if not isinstance(payload, dict) or "kind" in payload or not isinstance(payload.get("action"), str):
+            return payload
+        return {key: value for key, value in payload.items() if key != "action"} | {
+            "kind": payload["action"]
+        }
 
     @staticmethod
     def _is_allowed(decision: AgentDecision, observation: AgentObservation) -> bool:

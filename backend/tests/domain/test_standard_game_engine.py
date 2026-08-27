@@ -71,6 +71,31 @@ def test_matched_wolf_attack_can_be_saved_by_witch() -> None:
     assert any(event.event_type == "night_announcement" for event in state.events)
 
 
+def test_dawn_announcement_identifies_the_players_who_died_overnight() -> None:
+    """A public dawn message names resolved night deaths, not only their count."""
+    engine = standard_engine(seed=7)
+    state = engine.create_game("human", requested_role_id="wolf")
+    wolves = [player for player in state.participants if player.role_id == "wolf"]
+    victim = next(player for player in state.participants if player.role_id == "villager")
+    seer = next(player for player in state.participants if player.role_id == "seer")
+    witch = next(player for player in state.participants if player.role_id == "witch")
+
+    for wolf in wolves:
+        state = engine.submit(
+            state, GameCommand(actor_id=wolf.participant_id, kind=CommandKind.WOLF_KILL, target_id=victim.participant_id)
+        )
+    state = engine.advance_automatic(state)
+    state = engine.submit(
+        state, GameCommand(actor_id=seer.participant_id, kind=CommandKind.NOOP)
+    )
+    state = engine.advance_automatic(state)
+    state = engine.submit(state, GameCommand(actor_id=witch.participant_id, kind=CommandKind.NOOP))
+    state = engine.advance_automatic(state)
+
+    announcement = next(event for event in state.events if event.event_type == "night_announcement")
+    assert announcement.payload == {"death_count": 1, "death_ids": [victim.participant_id]}
+
+
 def test_tied_day_votes_do_not_execute_any_player() -> None:
     engine = standard_engine(seed=7)
     state = engine.create_game("human", requested_role_id="villager").model_copy(update={"phase": Phase.DAY_VOTE})

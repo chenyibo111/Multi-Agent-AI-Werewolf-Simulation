@@ -7,7 +7,10 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from werewolf_arena.agents.config import DEFAULT_LLM_MAX_OUTPUT_TOKENS
 from werewolf_arena.domain.models import AgentUsage
+
+MODEL_COMPLETION_MAX_TOKENS = DEFAULT_LLM_MAX_OUTPUT_TOKENS
 
 
 @dataclass(frozen=True)
@@ -26,7 +29,11 @@ class AgentBudget:
     max_total_tokens: int = 24_000
     max_cost_usd: float | None = None
 
-    def reserve(self, usage: AgentUsage, estimated_output_tokens: int) -> BudgetReservation:
+    def reserve(
+        self,
+        usage: AgentUsage,
+        estimated_output_tokens: int = MODEL_COMPLETION_MAX_TOKENS,
+    ) -> BudgetReservation:
         """Reject a call before it starts when any configured room budget is exhausted."""
         if usage.model_calls >= self.max_model_calls:
             return BudgetReservation(False, "model_call_limit")

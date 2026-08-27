@@ -30,6 +30,29 @@ def test_public_speech_and_discussion_end_transition_to_day_vote() -> None:
     assert state.events[-1].event_type == "discussion_ended"
 
 
+def test_discussion_automatically_ends_when_the_human_has_died() -> None:
+    """A dead human cannot be required to close discussion before the AI vote."""
+    engine = _engine()
+    state = engine.create_game("human", requested_role_id="seer")
+    state = state.model_copy(
+        update={
+            "phase": Phase.DAY_DISCUSSION,
+            "participants": tuple(
+                participant.model_copy(update={"alive": False})
+                if participant.participant_id == "human"
+                else participant
+                for participant in state.participants
+            ),
+        }
+    )
+
+    state = engine.advance_automatic(state)
+
+    assert state.phase is Phase.DAY_VOTE
+    assert state.events[-1].event_type == "discussion_ended"
+    assert state.events[-1].payload == {"actor_id": "system"}
+
+
 def test_all_abstentions_resolve_without_executing_an_empty_target() -> None:
     """Abstentions complete the vote phase and never create an empty-player execution."""
     engine = _engine()
@@ -42,6 +65,7 @@ def test_all_abstentions_resolve_without_executing_an_empty_target() -> None:
     state = engine.advance_automatic(state)
 
     assert state.phase is Phase.NIGHT_WOLF
+    assert state.pending_commands == ()
     assert state.events[-2].event_type == "vote_no_execution"
     assert state.events[-1].event_type == "phase_changed"
 
