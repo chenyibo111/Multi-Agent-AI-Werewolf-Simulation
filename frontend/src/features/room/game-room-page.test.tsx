@@ -214,6 +214,12 @@ describe("RoomTimeline", () => {
 });
 
 describe("PrivatePanel", () => {
+  it("renders the active player's role in Chinese", () => {
+    render(<PrivatePanel state={waitingSeerState} />);
+
+    expect(screen.getByText("预言家")).toBeVisible();
+  });
+
   it("shows an active wolf their living teammate", () => {
     render(<PrivatePanel state={{ ...waitingSeerState, participants: { ...waitingSeerState.participants, human: { participant_id: "human", display_name: "你", alive: true, role_id: "wolf" } }, wolf_teammates: [{ participant_id: "ai-1", display_name: "林小雨", seat_number: 2, alive: true }] }} />);
 
@@ -240,9 +246,16 @@ describe("PrivatePanel", () => {
 });
 
 describe("PlayerRail", () => {
-  it("shows the randomized public seat number", () => {
-    render(<PlayerRail state={{ ...waitingSeerState, participants: { "ai-1": { participant_id: "ai-1", display_name: "林小雨", seat_number: 4, alive: true } } }} />);
+  it("shows explicit life status and Chinese labels only for authorized roles", () => {
+    render(<PlayerRail state={{ ...waitingSeerState, participants: {
+      "ai-1": { participant_id: "ai-1", display_name: "林小雨", seat_number: 4, alive: true, role_id: "witch" },
+      "ai-2": { participant_id: "ai-2", display_name: "周子墨", seat_number: 5, alive: false },
+    } }} />);
 
     expect(screen.getByText("4号 林小雨")).toBeVisible();
+    expect(screen.getByText("存活")).toBeVisible();
+    expect(screen.getByText("已出局")).toBeVisible();
+    expect(screen.getByText("女巫")).toBeVisible();
+    expect(screen.queryByText("狼人")).not.toBeInTheDocument();
   });
 });
