@@ -158,8 +158,8 @@ def test_submitted_human_vote_starts_ai_votes_without_a_duplicate_command() -> N
     asyncio.run(scenario())
 
 
-def test_ai_vote_reason_is_public_after_the_vote_is_accepted() -> None:
-    """A safe AI vote reason is visible to another live player as a public event."""
+def test_ai_vote_reason_is_hidden_from_live_players_after_the_vote_is_accepted() -> None:
+    """Strategy explanations are replay-only information, never live public evidence."""
 
     class VotingPolicy:
         async def decide(self, observation):
@@ -192,16 +192,17 @@ def test_ai_vote_reason_is_public_after_the_vote_is_accepted() -> None:
         )
 
         assert len(reasons) == len(policies)
-        assert reasons[0].visibility is Visibility.PUBLIC
+        assert reasons[0].visibility is Visibility.PRIVATE
+        assert reasons[0].recipient_ids == frozenset({reasons[0].payload["actor_id"]})
         assert reasons[0].payload["action_kind"] == CommandKind.VOTE.value
         assert reasons[0].payload["reason"] == "票型和发言前后矛盾。"
-        assert any(event["event_type"] == "agent_public_reason" for event in viewer_events)
+        assert all(event["event_type"] != "agent_public_reason" for event in viewer_events)
 
     asyncio.run(scenario())
 
 
-def test_ai_night_reason_is_private_to_the_acting_player() -> None:
-    """A live non-recipient cannot project a wolf's night-action reason."""
+def test_ai_night_reason_is_visible_only_in_a_global_replay_view() -> None:
+    """Night strategy explanations remain hidden during play, including from the actor's live view."""
 
     class WolfPolicy:
         async def decide(self, observation):
@@ -229,6 +230,11 @@ def test_ai_night_reason_is_private_to_the_acting_player() -> None:
             ViewerContext("human", ViewerKind.ALIVE_HUMAN),
             advanced,
         )
+        dead_events = project_events(
+            advanced.events,
+            ViewerContext("human", ViewerKind.DEAD_GLOBAL),
+            advanced,
+        )
 
         assert reason.visibility is Visibility.PRIVATE
         assert reason.recipient_ids == frozenset({wolves[0].participant_id})
@@ -236,8 +242,9 @@ def test_ai_night_reason_is_private_to_the_acting_player() -> None:
         assert reason.payload["target_id"] in {
             participant.participant_id for participant in state.participants if participant.role_id != "wolf"
         }
-        assert any(event["event_type"] == "agent_private_reason" for event in actor_events)
+        assert all(event["event_type"] != "agent_private_reason" for event in actor_events)
         assert all(event["event_type"] != "agent_private_reason" for event in unrelated_events)
+        assert any(event["event_type"] == "agent_private_reason" for event in dead_events)
 
     asyncio.run(scenario())
 

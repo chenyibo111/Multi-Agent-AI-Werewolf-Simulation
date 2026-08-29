@@ -317,7 +317,8 @@ class GameOrchestrator:
                     "action_kind": decision.kind.value,
                     "reason": reason,
                 },
-                Visibility.PUBLIC,
+                Visibility.PRIVATE,
+                frozenset({actor.participant_id}),
             )
         if decision.kind in {
             CommandKind.WOLF_KILL,

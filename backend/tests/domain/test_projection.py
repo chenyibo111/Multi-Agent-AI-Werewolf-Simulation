@@ -112,6 +112,23 @@ def test_dead_global_view_replays_private_agent_reason_without_sensitive_fields(
     }
 
 
+def test_live_players_cannot_view_strategy_reasons_but_dead_global_view_can() -> None:
+    engine = GameEngine(standard_role_registry(), standard_six_player_mode(), seed=7)
+    state = engine.create_game("human", requested_role_id="villager").append_event(
+        "agent_public_reason",
+        {"actor_id": "ai-1", "action_kind": "speak", "reason": "先伪装成好人，观察局势。"},
+        Visibility.PUBLIC,
+    )
+
+    live_events = project_events(state.events, ViewerContext("human", ViewerKind.ALIVE_HUMAN), state)
+    dead_events = project_events(state.events, ViewerContext("human", ViewerKind.DEAD_GLOBAL), state)
+
+    assert all(event["event_type"] != "agent_public_reason" for event in live_events)
+    assert next(event for event in dead_events if event["event_type"] == "agent_public_reason")["payload"]["reason"] == (
+        "先伪装成好人，观察局势。"
+    )
+
+
 def test_finished_report_reveals_roles_without_putting_them_in_live_snapshot() -> None:
     """Final identities belong to a report, not to the ordinary room projection."""
     engine = GameEngine(standard_role_registry(), standard_six_player_mode(), seed=7)

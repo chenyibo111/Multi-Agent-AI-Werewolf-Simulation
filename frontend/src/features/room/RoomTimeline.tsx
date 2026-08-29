@@ -1,8 +1,18 @@
 import type { ProjectedParticipant, RoomEvent } from "../../lib/types";
 import { phaseLabel } from "../../lib/game-labels";
 
-export function RoomTimeline({ events, participants = {} }: { events: RoomEvent[]; participants?: Record<string, ProjectedParticipant> }) {
-  return <section className="timeline" aria-label="公开对局时间线"><h2>对局叙事</h2>{events.length === 0 ? <p>等待第一条公开事件。</p> : events.map((event) => <article className="timeline-event" key={event.sequence}><span>#{event.sequence}</span><p>{eventText(event, participants)}</p></article>)}</section>;
+export function RoomTimeline({
+  events,
+  participants = {},
+  title = "对局叙事",
+  ariaLabel = "公开对局时间线",
+}: {
+  events: RoomEvent[];
+  participants?: Record<string, ProjectedParticipant>;
+  title?: string;
+  ariaLabel?: string;
+}) {
+  return <section className="timeline" aria-label={ariaLabel}><h2>{title}</h2>{events.length === 0 ? <p>等待第一条公开事件。</p> : events.map((event) => <article className="timeline-event" key={event.sequence}><span>#{event.sequence}</span><p>{eventText(event, participants)}</p></article>)}</section>;
 }
 
 function eventText(event: RoomEvent, participants: Record<string, ProjectedParticipant>): string {

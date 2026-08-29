@@ -8,6 +8,8 @@ from enum import Enum
 from .enums import Visibility
 from .models import GameEvent, GameState
 
+_STRATEGY_REASON_EVENT_TYPES = frozenset({"agent_public_reason", "agent_private_reason"})
+
 
 class ViewerKind(str, Enum):
     """决定玩家在对局中可见信息的身份状态。"""
@@ -86,6 +88,8 @@ def project_finished_report(state: GameState) -> dict[str, object]:
 def _can_view(event: GameEvent, viewer: ViewerContext) -> bool:
     if viewer.kind in {ViewerKind.DEAD_GLOBAL, ViewerKind.FINISHED_REPLAY}:
         return event.visibility is not Visibility.SERVER
+    if event.event_type in _STRATEGY_REASON_EVENT_TYPES:
+        return False
     if event.visibility is Visibility.PUBLIC:
         return True
     return viewer.kind is ViewerKind.ALIVE_HUMAN and viewer.participant_id in event.recipient_ids
