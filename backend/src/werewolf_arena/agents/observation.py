@@ -9,7 +9,6 @@ from .models import AgentMemory, AgentObservation, PublicPlayer
 
 _PUBLIC_REASONING_EVENT_TYPES = frozenset(
     {
-        "agent_public_reason",
         "public_speech",
         "night_announcement",
         "vote_result",

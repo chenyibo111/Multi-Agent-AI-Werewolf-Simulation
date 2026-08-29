@@ -65,18 +65,19 @@ def test_observation_includes_named_public_roster_without_roles() -> None:
     assert "role_id" not in observation.public_players[0].model_dump()
 
 
-def test_observation_retains_public_agent_reasons_for_later_judgment() -> None:
+def test_observation_excludes_another_agents_strategy_reason() -> None:
     engine = GameEngine(standard_role_registry(), standard_six_player_mode(), seed=7)
     state = engine.create_game("human", requested_role_id="villager").append_event(
         "agent_public_reason",
         {"actor_id": "ai-1", "action_kind": "vote", "reason": "票型最可疑。"},
-        Visibility.PUBLIC,
+        Visibility.PRIVATE,
+        frozenset({"ai-1"}),
     )
 
     observation = build_observation(state, "ai-2")
 
-    assert observation.public_events[-1]["event_type"] == "agent_public_reason"
-    assert observation.public_events[-1]["payload"]["reason"] == "票型最可疑。"
+    assert all(event["event_type"] != "agent_public_reason" for event in observation.public_events)
+    assert all(event["event_type"] != "agent_public_reason" for event in observation.private_events)
 
 
 def test_policy_rejects_model_actor_override_and_returns_safe_noop() -> None:

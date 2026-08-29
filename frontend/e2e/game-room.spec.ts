@@ -28,3 +28,12 @@ test("a room can be resumed from local history and deleted", async ({ page }) =>
   await page.getByRole("button", { name: "删除对局" }).click();
   await expect(page.getByText("暂无本地对局记录")).toBeVisible();
 });
+
+test("the human action panel stays docked beside a long desktop timeline", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto("/");
+  await page.getByLabel("选择身份").selectOption("seer");
+  await page.getByRole("button", { name: "开始对局" }).click();
+
+  await expect(page.locator(".action-panel")).toHaveCSS("position", "sticky");
+});
