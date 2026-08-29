@@ -37,3 +37,14 @@ test("the human action panel stays docked beside a long desktop timeline", async
 
   await expect(page.locator(".action-panel")).toHaveCSS("position", "sticky");
 });
+
+test("the room uses independent desktop scrolling panes instead of document scrolling", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto("/");
+  await page.getByLabel("选择身份").selectOption("seer");
+  await page.getByRole("button", { name: "开始对局" }).click();
+
+  await expect(page.locator(".game-layout")).toHaveCSS("overflow-y", "hidden");
+  await expect(page.locator(".timeline")).toHaveCSS("overflow-y", "auto");
+  await expect(page.locator(".room-sidebar")).toHaveCSS("overflow-y", "auto");
+});
