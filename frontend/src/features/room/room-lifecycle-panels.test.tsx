@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { FinishedReport } from "./FinishedReport";
@@ -18,5 +18,30 @@ describe("room lifecycle panels", () => {
     expect(screen.getByText("完整复盘")).toBeVisible();
     expect(screen.getByText("狼人阵营获胜")).toBeVisible();
     expect(screen.getByText("AI 玩家 1 · 狼人")).toBeVisible();
+  });
+
+  it("renders the complete safe event timeline from a finished report", () => {
+    const { container } = render(
+      <FinishedReport
+        report={{
+          winner_faction: "villager",
+          participants: {
+            "ai-1": { participant_id: "ai-1", display_name: "林小雨", alive: false, role_id: "wolf" },
+          },
+          events: [
+            {
+              sequence: 3,
+              event_type: "inspection_result",
+              payload: { target_id: "ai-1", is_wolf: true, server_secret: "must-not-render" },
+              visibility: "private",
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(within(container).getByRole("heading", { name: "完整事件时间线" })).toBeVisible();
+    expect(within(container).getByText("查验结果：林小雨 是狼人。")).toBeVisible();
+    expect(within(container).queryByText("must-not-render")).not.toBeInTheDocument();
   });
 });

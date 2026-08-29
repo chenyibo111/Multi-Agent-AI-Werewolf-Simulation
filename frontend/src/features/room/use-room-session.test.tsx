@@ -83,4 +83,79 @@ describe("useRoomSession", () => {
 
     act(unmount);
   });
+
+  it("reloads globally visible history when automatic continuation turns the player into a spectator", async () => {
+    vi.stubGlobal("WebSocket", MockWebSocket);
+    const pendingAutomaticWork: RoomPayload = {
+      ...payload,
+      state: { ...payload.state, phase: "day_discussion", waiting_for_human: false, human_actions: [] },
+    };
+    const spectatorDelta: RoomPayload = {
+      state: { ...pendingAutomaticWork.state, view_mode: "spectating" },
+      events: [{ sequence: 9, event_type: "night_announcement", payload: { death_ids: ["human"] }, visibility: "public" }],
+    };
+    const globalHistory: RoomPayload = {
+      state: spectatorDelta.state,
+      events: [
+        { sequence: 3, event_type: "inspection_result", payload: { target_id: "ai-1", is_wolf: true }, visibility: "private" },
+        ...payload.events,
+        ...spectatorDelta.events,
+      ],
+    };
+    const api = {
+      getRoom: vi.fn().mockResolvedValueOnce(pendingAutomaticWork).mockResolvedValueOnce(globalHistory),
+      continueRoom: vi.fn().mockResolvedValue(spectatorDelta),
+      submitCommand: vi.fn(),
+    } as unknown as ApiClient;
+
+    const { result, unmount } = renderHook(() => useRoomSession("room-1", api));
+
+    await waitFor(() => expect(result.current.snapshot?.view_mode).toBe("spectating"));
+    expect(result.current.events.map((event) => event.sequence)).toEqual([3, 7, 9]);
+
+    act(unmount);
+  });
+
+  it("reloads globally visible history when a submitted action turns the player into a spectator", async () => {
+    vi.stubGlobal("WebSocket", MockWebSocket);
+    const spectatorDelta: RoomPayload = {
+      state: {
+        ...payload.state,
+        phase: "day_discussion",
+        waiting_for_human: false,
+        human_actions: [],
+        view_mode: "spectating",
+      },
+      events: [{ sequence: 9, event_type: "night_announcement", payload: { death_ids: ["human"] }, visibility: "public" }],
+    };
+    const globalHistory: RoomPayload = {
+      state: spectatorDelta.state,
+      events: [
+        { sequence: 3, event_type: "inspection_result", payload: { target_id: "ai-1", is_wolf: true }, visibility: "private" },
+        ...payload.events,
+        ...spectatorDelta.events,
+      ],
+    };
+    const api = {
+      getRoom: vi.fn().mockResolvedValueOnce(payload).mockResolvedValueOnce(globalHistory),
+      continueRoom: vi.fn(),
+      submitCommand: vi.fn().mockResolvedValue(spectatorDelta),
+    } as unknown as ApiClient;
+
+    const { result, unmount } = renderHook(() => useRoomSession("room-1", api));
+    await waitFor(() => expect(result.current.snapshot?.view_mode).toBe("active"));
+
+    await act(async () => {
+      await result.current.submitCommand({ kind: "inspect", target_id: "ai-1" });
+    });
+
+    await waitFor(() => expect(result.current.snapshot?.view_mode).toBe("spectating"));
+    expect(result.current.events.map((event) => event.sequence)).toEqual([3, 7, 9]);
+    expect(result.current.events[0]).toMatchObject({
+      event_type: "inspection_result",
+      visibility: "private",
+    });
+
+    act(unmount);
+  });
 });

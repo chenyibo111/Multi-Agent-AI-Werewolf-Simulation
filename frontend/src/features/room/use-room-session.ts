@@ -24,6 +24,7 @@ export function useRoomSession(roomId: string, apiClient: ApiClient): RoomSessio
   const [connection, setConnection] = useState<ConnectionStatus>("loading");
   const [error, setError] = useState<string | null>(null);
   const latestSequence = useRef(0);
+  const latestViewMode = useRef<RoomSnapshot["view_mode"] | null>(null);
 
   const mergeEvents = useCallback((incoming: RoomEvent[]) => {
     setEvents((current) => {
@@ -35,6 +36,7 @@ export function useRoomSession(roomId: string, apiClient: ApiClient): RoomSessio
 
   const applyPayload = useCallback(
     (payload: RoomPayload) => {
+      latestViewMode.current = payload.state.view_mode;
       setSnapshot(payload.state);
       latestSequence.current = Math.max(
         latestSequence.current,
@@ -43,6 +45,17 @@ export function useRoomSession(roomId: string, apiClient: ApiClient): RoomSessio
       mergeEvents(payload.events);
     },
     [mergeEvents],
+  );
+
+  const applyPayloadAndRefreshSpectatorHistory = useCallback(
+    async (payload: RoomPayload) => {
+      const wasSpectating = latestViewMode.current === "spectating";
+      applyPayload(payload);
+      if (!wasSpectating && payload.state.view_mode === "spectating") {
+        applyPayload(await apiClient.getRoom(roomId));
+      }
+    },
+    [apiClient, applyPayload, roomId],
   );
 
   const refresh = useCallback(async () => {
@@ -58,23 +71,24 @@ export function useRoomSession(roomId: string, apiClient: ApiClient): RoomSessio
   const continueRoom = useCallback(async () => {
     try {
       setError(null);
-      applyPayload(await apiClient.continueRoom(roomId));
+      await applyPayloadAndRefreshSpectatorHistory(await apiClient.continueRoom(roomId));
     } catch (caught) {
       setError(messageFor(caught));
     }
-  }, [apiClient, applyPayload, roomId]);
+  }, [apiClient, applyPayloadAndRefreshSpectatorHistory, roomId]);
 
   const submitCommand = useCallback(
     async (command: HumanCommand) => {
       try {
         setError(null);
-        applyPayload(await apiClient.submitCommand(roomId, command));
+        const submitted = await apiClient.submitCommand(roomId, command);
+        await applyPayloadAndRefreshSpectatorHistory(submitted);
       } catch (caught) {
         setError(messageFor(caught));
         throw caught;
       }
     },
-    [apiClient, applyPayload, roomId],
+    [apiClient, applyPayloadAndRefreshSpectatorHistory, roomId],
   );
 
   useEffect(() => {
@@ -113,7 +127,7 @@ export function useRoomSession(roomId: string, apiClient: ApiClient): RoomSessio
         const initial = await apiClient.getRoom(roomId);
         applyPayload(initial);
         if (initial.state.status === "running" && !initial.state.waiting_for_human) {
-          applyPayload(await apiClient.continueRoom(roomId));
+          await applyPayloadAndRefreshSpectatorHistory(await apiClient.continueRoom(roomId));
         }
         connect();
       } catch (caught) {
@@ -127,7 +141,7 @@ export function useRoomSession(roomId: string, apiClient: ApiClient): RoomSessio
       if (retryTimer !== undefined) clearTimeout(retryTimer);
       socket?.close();
     };
-  }, [apiClient, applyPayload, mergeEvents, roomId]);
+  }, [apiClient, applyPayload, applyPayloadAndRefreshSpectatorHistory, mergeEvents, roomId]);
 
   return { snapshot, events, connection, error, refresh, continueRoom, submitCommand };
 }
