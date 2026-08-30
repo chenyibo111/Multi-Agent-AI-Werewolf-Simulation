@@ -15,7 +15,7 @@ export function RoomTimeline({
   return <section className="timeline" aria-label={ariaLabel}><h2>{title}</h2>{events.length === 0 ? <p>等待第一条公开事件。</p> : events.map((event) => <article className="timeline-event" key={event.sequence}><span>#{event.sequence}</span><p>{eventText(event, participants)}</p></article>)}</section>;
 }
 
-function eventText(event: RoomEvent, participants: Record<string, ProjectedParticipant>): string {
+export function eventText(event: RoomEvent, participants: Record<string, ProjectedParticipant>): string {
   const payload = event.payload;
   if (event.event_type === "phase_changed" && typeof payload.phase === "string") return `阶段切换：${phaseLabel(payload.phase)}`;
   if (event.event_type === "inspection_result" && typeof payload.target_id === "string" && typeof payload.is_wolf === "boolean") return `查验结果：${displayName(payload.target_id, participants)} ${payload.is_wolf ? "是狼人" : "不是狼人"}。`;
