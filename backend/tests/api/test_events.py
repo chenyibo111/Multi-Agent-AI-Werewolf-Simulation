@@ -6,12 +6,21 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
+from werewolf_arena.agents.model_client import ModelCompletion
 from werewolf_arena.api.app import create_app
+
+
+class NoopModelClient:
+    """Keep WebSocket transport tests independent from the developer's live model settings."""
+
+    async def complete(self, system_prompt: str, user_prompt: str, max_output_tokens: int) -> ModelCompletion:
+        del system_prompt, user_prompt, max_output_tokens
+        return ModelCompletion('{"kind":"noop"}')
 
 
 def test_websocket_replays_visible_events_and_streams_new_ones(tmp_path) -> None:
     """Reconnects resume at a sequence while authority-only events stay hidden."""
-    app = create_app(database_path=tmp_path / "werewolf.db")
+    app = create_app(database_path=tmp_path / "werewolf.db", model_client=NoopModelClient())
     with TestClient(app) as client:
         created = client.post("/api/rooms", json={"requested_role_id": "wolf"}).json()
         room_id = created["room_id"]
@@ -46,7 +55,7 @@ def test_websocket_replays_visible_events_and_streams_new_ones(tmp_path) -> None
 
 def test_websocket_rejects_foreign_room_token(tmp_path) -> None:
     """A token from another room closes the connection before acceptance."""
-    app = create_app(database_path=tmp_path / "werewolf.db")
+    app = create_app(database_path=tmp_path / "werewolf.db", model_client=NoopModelClient())
     with TestClient(app) as client:
         first = client.post("/api/rooms", json={}).json()
         second = client.post("/api/rooms", json={}).json()
@@ -63,7 +72,7 @@ def test_websocket_rejects_foreign_room_token(tmp_path) -> None:
 
 def test_websocket_accepts_the_room_scoped_browser_cookie(tmp_path) -> None:
     """The session cookie issued at room creation also authenticates browser WebSockets."""
-    app = create_app(database_path=tmp_path / "werewolf.db")
+    app = create_app(database_path=tmp_path / "werewolf.db", model_client=NoopModelClient())
     with TestClient(app) as client:
         created = client.post("/api/rooms", json={"requested_role_id": "wolf"}).json()
 

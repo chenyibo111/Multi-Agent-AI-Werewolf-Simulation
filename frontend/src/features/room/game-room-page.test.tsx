@@ -1,12 +1,18 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter } from "react-router-dom";
 
+import type { ApiClient } from "../../lib/api-client";
 import type { RoomSnapshot } from "../../lib/types";
 import { ActionPanel } from "./ActionPanel";
+import { GameRoomPage } from "./GameRoomPage";
 import { PrivatePanel } from "./PrivatePanel";
 import { PlayerRail } from "./PlayerRail";
 import { RoomTimeline } from "./RoomTimeline";
+import { useRoomSession } from "./use-room-session";
+
+vi.mock("./use-room-session", () => ({ useRoomSession: vi.fn() }));
 
 const waitingSeerState: RoomSnapshot = {
   game_id: "room-1",
@@ -310,5 +316,42 @@ describe("PlayerRail", () => {
     expect(screen.getByText("已出局")).toBeVisible();
     expect(screen.getByText("女巫")).toBeVisible();
     expect(screen.queryByText("狼人")).not.toBeInTheDocument();
+  });
+});
+
+describe("GameRoomPage", () => {
+  it("shows a degraded aggregate model status and the latest fallback reason", () => {
+    vi.mocked(useRoomSession).mockReturnValue({
+      snapshot: {
+        ...waitingSeerState,
+        agent_health: {
+          status: "degraded",
+          total_calls: 4,
+          successful_calls: 3,
+          fallback_calls: 1,
+          input_tokens: 120,
+          output_tokens: 40,
+          average_latency_ms: 210,
+          latest_failure_kind: "model_error",
+        },
+      },
+      events: [],
+      connection: "connected",
+      error: null,
+      refresh: vi.fn(),
+      continueRoom: vi.fn(),
+      submitCommand: vi.fn(),
+    });
+
+    render(
+      <MemoryRouter>
+        <GameRoomPage roomId="room-1" apiClient={{ getReport: vi.fn() } as unknown as ApiClient} />
+      </MemoryRouter>,
+    );
+
+    const panel = within(screen.getByLabelText("模型运行状态"));
+    expect(panel.getByText("已降级")).toBeVisible();
+    expect(panel.getByText("调用 4 次 · 平均 210 ms")).toBeVisible();
+    expect(panel.getByText("最近原因：model_error")).toBeVisible();
   });
 });

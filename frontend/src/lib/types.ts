@@ -24,6 +24,17 @@ export type ProjectedParticipant = {
   private_state?: Record<string, unknown>;
 };
 
+export type AgentHealth = {
+  status: "idle" | "healthy" | "degraded";
+  total_calls: number;
+  successful_calls: number;
+  fallback_calls: number;
+  input_tokens: number;
+  output_tokens: number;
+  average_latency_ms: number;
+  latest_failure_kind: string | null;
+};
+
 export type RoomSnapshot = {
   game_id: string;
   phase: string;
@@ -37,6 +48,7 @@ export type RoomSnapshot = {
   wolf_teammates?: ProjectedParticipant[];
   phase_text: string;
   view_mode: "active" | "spectating" | "finished";
+  agent_health?: AgentHealth;
 };
 
 export type RoomEvent = {
