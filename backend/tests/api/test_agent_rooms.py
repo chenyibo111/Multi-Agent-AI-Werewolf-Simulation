@@ -46,6 +46,31 @@ def test_create_room_auto_advances_and_sets_a_room_scoped_session_cookie(tmp_pat
     assert "agent_memory" not in response.text
 
 
+def test_room_state_exposes_only_safe_aggregate_model_health(tmp_path) -> None:
+    """A browser can diagnose a fallback-safe game without receiving model or agent internals."""
+    app = create_app(database_path=tmp_path / "werewolf.db", model_client=ScriptedRoomClient())
+    with TestClient(app) as client:
+        response = client.post("/api/rooms", json={"requested_role_id": "seer"})
+
+    assert response.status_code == 201
+    health = response.json()["state"]["agent_health"]
+    assert health["status"] == "healthy"
+    assert health["total_calls"] > 0
+    assert health["successful_calls"] == health["total_calls"]
+    assert health["fallback_calls"] == 0
+    assert health["latest_failure_kind"] is None
+    assert set(health) == {
+        "status",
+        "total_calls",
+        "successful_calls",
+        "fallback_calls",
+        "input_tokens",
+        "output_tokens",
+        "average_latency_ms",
+        "latest_failure_kind",
+    }
+
+
 def test_continue_uses_the_room_cookie_after_a_restart_safe_wait(tmp_path) -> None:
     """A browser can request continuation with its room cookie rather than a custom WS header."""
     app = create_app(database_path=tmp_path / "werewolf.db", model_client=ScriptedRoomClient())

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from werewolf_arena.agents.model_client import ModelCompletion
 from werewolf_arena.api.app import create_app
 from werewolf_arena.api.routes.rooms import _state_view
 from werewolf_arena.domain.engine import GameEngine
@@ -13,9 +14,17 @@ from werewolf_arena.domain.projection import ViewerContext, ViewerKind
 from werewolf_arena.roles.standard import standard_role_registry
 
 
+class NoopModelClient:
+    """Keep REST contract tests independent from local live-model configuration."""
+
+    async def complete(self, system_prompt: str, user_prompt: str, max_output_tokens: int) -> ModelCompletion:
+        del system_prompt, user_prompt, max_output_tokens
+        return ModelCompletion('{"kind":"noop"}')
+
+
 def test_room_rest_lifecycle_requires_its_own_bearer_token(tmp_path) -> None:
     """The client can create, view, command, and delete only its own room."""
-    app = create_app(database_path=tmp_path / "werewolf.db")
+    app = create_app(database_path=tmp_path / "werewolf.db", model_client=NoopModelClient())
     with TestClient(app) as client:
         created = client.post("/api/rooms", json={"requested_role_id": "wolf"})
         assert created.status_code == 201
@@ -58,7 +67,7 @@ def test_room_rest_lifecycle_requires_its_own_bearer_token(tmp_path) -> None:
 
 def test_rejected_command_returns_safe_validation_response(tmp_path) -> None:
     """A domain rejection becomes a 422 response without leaking authority fields."""
-    app = create_app(database_path=tmp_path / "werewolf.db")
+    app = create_app(database_path=tmp_path / "werewolf.db", model_client=NoopModelClient())
     with TestClient(app) as client:
         created = client.post("/api/rooms", json={"requested_role_id": "wolf"}).json()
         headers = {"Authorization": f"Bearer {created['session_token']}"}
@@ -76,7 +85,7 @@ def test_rejected_command_returns_safe_validation_response(tmp_path) -> None:
 
 def test_running_room_rejects_finished_report_request(tmp_path) -> None:
     """The report route cannot turn an in-progress room into an identity leak."""
-    app = create_app(database_path=tmp_path / "werewolf.db")
+    app = create_app(database_path=tmp_path / "werewolf.db", model_client=NoopModelClient())
     with TestClient(app) as client:
         created = client.post("/api/rooms", json={"requested_role_id": "wolf"}).json()
         response = client.get(f"/api/rooms/{created['room_id']}/report")
@@ -154,11 +163,11 @@ def test_active_wolf_view_exposes_only_living_teammate_public_identity() -> None
 def test_room_resumes_after_application_restart(tmp_path) -> None:
     """A fresh application instance loads the durable snapshot for its existing token."""
     database_path = tmp_path / "werewolf.db"
-    with TestClient(create_app(database_path=database_path)) as first_client:
+    with TestClient(create_app(database_path=database_path, model_client=NoopModelClient())) as first_client:
         created = first_client.post("/api/rooms", json={"requested_role_id": "wolf"}).json()
 
     headers = {"Authorization": f"Bearer {created['session_token']}"}
-    with TestClient(create_app(database_path=database_path)) as restarted_client:
+    with TestClient(create_app(database_path=database_path, model_client=NoopModelClient())) as restarted_client:
         resumed = restarted_client.get(f"/api/rooms/{created['room_id']}", headers=headers)
 
     assert resumed.status_code == 200

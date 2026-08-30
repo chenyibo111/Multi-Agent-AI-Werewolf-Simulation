@@ -8,6 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 
+from werewolf_arena.agents.health import AgentHealth, project_agent_health
 from werewolf_arena.agents.observation import build_observation
 from werewolf_arena.domain.enums import CommandKind
 from werewolf_arena.domain.models import GameCommand, GameState
@@ -44,7 +45,9 @@ async def create_room(payload: CreateRoomRequest, request: Request) -> JSONRespo
     response = JSONResponse(status_code=status.HTTP_201_CREATED, content={
         "room_id": str(state.game_id),
         "session_token": session_token,
-        "state": _state_view(result.state, viewer, result.waiting_for_human, result.human_actions),
+        "state": await _room_state_view(
+            request, result.state, viewer, result.waiting_for_human, result.human_actions
+        ),
         "events": project_events(result.state.events, viewer, result.state),
     })
     response.set_cookie(
@@ -59,6 +62,7 @@ async def create_room(payload: CreateRoomRequest, request: Request) -> JSONRespo
 
 @router.get("/{room_id}")
 async def get_room(
+    request: Request,
     authorized: Annotated[AuthorizedRoom, Depends(require_room_session)],
 ) -> dict[str, object]:
     """Return the authenticated player's permission-filtered room snapshot."""
@@ -66,7 +70,9 @@ async def get_room(
     current = await authorized.runtime.current_wait_status()
     viewer = _current_viewer(state, authorized.participant_id)
     return {
-        "state": _state_view(state, viewer, current.waiting_for_human, current.human_actions),
+        "state": await _room_state_view(
+            request, state, viewer, current.waiting_for_human, current.human_actions
+        ),
         "events": project_events(state.events, viewer, state),
     }
 
@@ -85,6 +91,7 @@ async def get_finished_report(
 @router.post("/{room_id}/commands")
 async def submit_command(
     payload: SubmitCommandRequest,
+    request: Request,
     authorized: Annotated[AuthorizedRoom, Depends(require_room_session)],
 ) -> dict[str, object]:
     """Submit a human intent; the authenticated session, never JSON, supplies its actor ID."""
@@ -106,20 +113,25 @@ async def submit_command(
     viewer = _current_viewer(result.state, authorized.participant_id)
     return {
         "accepted": True,
-        "state": _state_view(result.state, viewer, result.waiting_for_human, result.human_actions),
+        "state": await _room_state_view(
+            request, result.state, viewer, result.waiting_for_human, result.human_actions
+        ),
         "events": project_events(new_events, viewer, result.state),
     }
 
 
 @router.post("/{room_id}/continue")
 async def continue_room(
+    request: Request,
     authorized: Annotated[AuthorizedRoom, Depends(require_room_session)],
 ) -> dict[str, object]:
     """Resume automatic AI work after an authorized reconnect or server restart."""
     result = await authorized.runtime.advance_until_waiting()
     viewer = _current_viewer(result.state, authorized.participant_id)
     return {
-        "state": _state_view(result.state, viewer, result.waiting_for_human, result.human_actions),
+        "state": await _room_state_view(
+            request, result.state, viewer, result.waiting_for_human, result.human_actions
+        ),
         "events": project_events(result.state.events, viewer, result.state),
     }
 
@@ -142,6 +154,7 @@ def _state_view(
     viewer: ViewerContext,
     waiting_for_human: bool,
     human_actions: tuple[CommandKind, ...],
+    agent_health: AgentHealth | None = None,
 ) -> dict[str, object]:
     viewer = _current_viewer(state, viewer.participant_id)
     view = project_state(state, viewer)
@@ -194,7 +207,27 @@ def _state_view(
         "day_vote": "白天投票",
         "finished": "对局结束",
     }.get(state.phase.value, "准备中")
+    if agent_health is not None:
+        view["agent_health"] = agent_health
     return view
+
+
+async def _room_state_view(
+    request: Request,
+    state: GameState,
+    viewer: ViewerContext,
+    waiting_for_human: bool,
+    human_actions: tuple[CommandKind, ...],
+) -> dict[str, object]:
+    """Build an authenticated state projection with redacted aggregate model health."""
+    runs = await request.app.state.repository.agent_runs_for(state.game_id)
+    return _state_view(
+        state,
+        viewer,
+        waiting_for_human,
+        human_actions,
+        project_agent_health(runs),
+    )
 
 
 def _current_viewer(state: GameState, participant_id: str) -> ViewerContext:
